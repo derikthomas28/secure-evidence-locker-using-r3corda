@@ -50,8 +50,10 @@ def encrypt_file(file_path):
     return enc_path, key.decode()
 
 if __name__ == "__main__":
-    # CHANGE THIS to your real file path
-    file_path = "/home/nightwing/Pictures/test_evidence.jpg"
+    if len(sys.argv) >= 2:
+        file_path = sys.argv[1]
+    else:
+        file_path = "sample\\evidence.png"
 
     print(f"Secure Evidence Locker Uploader")
     print(f"File: {file_path}\n")
