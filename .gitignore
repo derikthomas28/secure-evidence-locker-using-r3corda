@@ -76,3 +76,15 @@ docs/virtualenv/
 
 # if you use the installQuasar task
 lib
+
+# Modern Web & Python ignores
+node_modules/
+dist/
+venv/
+.env
+.env.local
+services/ai-storage/uploads/
+services/ai-storage/__pycache__/
+frontend/.vite/
+frontend/node_modules/
+frontend/dist/

@@ -4,17 +4,21 @@ import com.template.states.EvidenceState;
 import net.corda.core.contracts.StateAndRef;
 import net.corda.core.messaging.CordaRPCOps;
 import net.corda.core.node.services.Vault;
+import net.corda.core.transactions.SignedTransaction;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import com.template.flows.IssueEvidenceFlow;
 import java.time.Instant;
+import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
 @RestController
+@CrossOrigin(origins = "*") // Enable CORS for the frontend
 @RequestMapping("/")
 public class Controller {
     private final CordaRPCOps proxy;
@@ -70,10 +74,25 @@ public class Controller {
                 presented,
                 match,
                 Instant.ofEpochSecond(state.getTimestamp()).toString(),
-                state.getOwner().getName().toString()
-        );
+                state.getOwner().getName().toString());
 
         return new ResponseEntity<>(result, HttpStatus.OK);
+    }
+
+    @PostMapping(value = "/api/evidence/issue", consumes = "application/json", produces = "text/plain")
+    public ResponseEntity<String> issueEvidence(@RequestBody IssueEvidenceRequest request) {
+        try {
+            // Using startTrackedFlow to wait for the flow to complete
+            SignedTransaction stx = proxy.startTrackedFlowDynamic(
+                    IssueEvidenceFlow.class,
+                    request.getEvidenceID(),
+                    request.getHash(),
+                    Collections.singletonList(request.getCustodyNote())).getReturnValue().get();
+
+            return new ResponseEntity<>("Evidence Issued. Tx: " + stx.getId(), HttpStatus.CREATED);
+        } catch (Exception e) {
+            return new ResponseEntity<>("Error: " + e.getMessage(), HttpStatus.INTERNAL_SERVER_ERROR);
+        }
     }
 
     public static class EvidenceSummary {
@@ -91,8 +110,7 @@ public class Controller {
             return new EvidenceSummary(
                     state.getEvidenceID(),
                     state.getHash(),
-                    state.getOwner().getName().toString()
-            );
+                    state.getOwner().getName().toString());
         }
 
         public String getEvidenceID() {
@@ -116,7 +134,8 @@ public class Controller {
         private long timestamp;
         private List<String> custodyHistory;
 
-        public EvidenceDetails(String evidenceID, String hash, String owner, String originalIssuer, long timestamp, List<String> custodyHistory) {
+        public EvidenceDetails(String evidenceID, String hash, String owner, String originalIssuer, long timestamp,
+                List<String> custodyHistory) {
             this.evidenceID = evidenceID;
             this.hash = hash;
             this.owner = owner;
@@ -132,8 +151,7 @@ public class Controller {
                     state.getOwner().getName().toString(),
                     state.getOriginalIssuer().getName().toString(),
                     state.getTimestamp(),
-                    state.getCustodyHistory()
-            );
+                    state.getCustodyHistory());
         }
 
         public String getEvidenceID() {
@@ -190,7 +208,8 @@ public class Controller {
         private String anchoredAt;
         private String owner;
 
-        public VerificationResult(String evidenceID, String storedHash, String presentedHash, boolean match, String anchoredAt, String owner) {
+        public VerificationResult(String evidenceID, String storedHash, String presentedHash, boolean match,
+                String anchoredAt, String owner) {
             this.evidenceID = evidenceID;
             this.storedHash = storedHash;
             this.presentedHash = presentedHash;
@@ -221,6 +240,38 @@ public class Controller {
 
         public String getOwner() {
             return owner;
+        }
+    }
+
+    public static class IssueEvidenceRequest {
+        private String evidenceID;
+        private String hash;
+        private String custodyNote;
+        // Optional: add fields for AI report, but for now we just put it in notes or
+        // ignore it on-chain to save space
+
+        public String getEvidenceID() {
+            return evidenceID;
+        }
+
+        public void setEvidenceID(String evidenceID) {
+            this.evidenceID = evidenceID;
+        }
+
+        public String getHash() {
+            return hash;
+        }
+
+        public void setHash(String hash) {
+            this.hash = hash;
+        }
+
+        public String getCustodyNote() {
+            return custodyNote;
+        }
+
+        public void setCustodyNote(String custodyNote) {
+            this.custodyNote = custodyNote;
         }
     }
 }
