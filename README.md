@@ -4,7 +4,7 @@
 
 # SECURELOCK: AI-Powered Blockchain Forensic Vault 🛡️
 
-### *Outstanding Final Year Project - CSE*
+###
 **SecureLock** is a decentralized application (dApp) designed to revolutionize digital evidence management. It bridges the gap between physical evidence collection and courtroom admissibility by leveraging **Enterprise Blockchain**, **Computer Vision AI**, and **Distributed Storage**.
 
 ---
