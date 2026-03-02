@@ -2,8 +2,13 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import {
   Upload, Shield, FileText, CheckCircle, AlertTriangle, Eye, Server, Activity,
-  Lock, Key, Navigation, Globe, Cpu, Hash, Clock, User, Download, FileCheck, ArrowRight
+  Lock, Key, Navigation, Globe, Cpu, Hash, Clock, User, Download, FileCheck, ArrowRight,
+  Scale, Users, MessageCircle, Scan, Terminal, BarChart3, Fingerprint as BioIcon,
+  LogOut, Wrench, HardDrive, Wifi, Database
 } from 'lucide-react';
+import JudicialAssistant from './JudicialAssistant';
+import CitizenNavigator from './CitizenNavigator';
+import LoginScreen from './LoginScreen';
 
 const API_AI_URL = "http://localhost:5000";
 const API_BLOCKCHAIN_URL = "http://localhost:10050";
@@ -54,7 +59,13 @@ const TimelineItem = ({ title, date, active, completed, icon: Icon }) => (
 // --- Main App ---
 
 function App() {
-  const [role, setRole] = useState('officer');
+  // Auth state
+  const [currentUser, setCurrentUser] = useState(null);
+  const [authToken, setAuthToken] = useState(null);
+
+  const role = currentUser?.role || null;
+  const perms = currentUser?.permissions || {};
+
   const [activeTab, setActiveTab] = useState('upload');
   const [file, setFile] = useState(null);
   const [analysis, setAnalysis] = useState(null);
@@ -69,12 +80,43 @@ function App() {
   const [isVerifying, setIsVerifying] = useState(false);
   const [showCert, setShowCert] = useState(null);
   const [evidenceList, setEvidenceList] = useState([]);
+  const [ocrResult, setOcrResult] = useState(null);
+  const [isScanning, setIsScanning] = useState(false);
+  const [ocrFile, setOcrFile] = useState(null);
+  const [systemHealth, setSystemHealth] = useState(null);
+
+  // Auth helper: create axios instance with token
+  const authHeaders = () => authToken ? { 'X-Auth-Token': authToken } : {};
+
+  const handleLogin = (data) => {
+    setAuthToken(data.token);
+    setCurrentUser(data);
+    // Set default tab based on role
+    if (data.role === 'judge') setActiveTab('judicial');
+    else if (data.role === 'public') setActiveTab('navigator');
+    else if (data.role === 'developer') setActiveTab('system');
+    else if (data.role === 'officer' || data.role === 'forensic') setActiveTab('upload');
+  };
+
+  const handleLogout = async () => {
+    try {
+      await fetch(`${API_AI_URL}/api/auth/logout`, {
+        method: 'POST',
+        headers: authHeaders()
+      });
+    } catch (e) { }
+    setCurrentUser(null);
+    setAuthToken(null);
+    setActiveTab('upload');
+    setAnalysis(null);
+    setOcrResult(null);
+    setVerifyResult(null);
+    setSystemHealth(null);
+  };
 
   useEffect(() => {
-    fetchEvidence();
-    if (role === 'judge') setActiveTab('verify');
-    else if (role === 'officer' && activeTab === 'verify') setActiveTab('upload');
-  }, [role]);
+    if (currentUser) fetchEvidence();
+  }, [currentUser]);
 
   const fetchEvidence = async () => {
     try {
@@ -102,21 +144,41 @@ function App() {
     }
   };
 
-  const analyzeEvidence = async () => {
-    console.log("Analyze clicked", file);
-    if (!file) {
-      alert("No file selected!");
-      return;
+  const handleOcrFileChange = (e) => {
+    if (e.target.files && e.target.files[0]) {
+      setOcrFile(e.target.files[0]);
+      setOcrResult(null);
     }
+  };
 
+  const runOcrScan = async () => {
+    if (!ocrFile) return;
+    setIsScanning(true);
+    const formData = new FormData();
+    formData.append('file', ocrFile);
+
+    try {
+      const res = await axios.post(`${API_AI_URL}/api/officer/ocr-scan`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data', ...authHeaders() }
+      });
+      setOcrResult(res.data);
+    } catch (err) {
+      console.error("OCR Scan failed", err);
+      alert("OCR Engine Offline: " + (err.response?.data?.error || err.message));
+    } finally {
+      setIsScanning(false);
+    }
+  };
+
+  const analyzeEvidence = async () => {
+    if (!file) { alert("No file selected!"); return; }
     setIsAnalyzing(true);
     const formData = new FormData();
     formData.append('file', file);
 
-    console.log("Sending request to:", `${API_AI_URL}/analyze`);
     try {
       const res = await axios.post(`${API_AI_URL}/analyze`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
+        headers: { 'Content-Type': 'multipart/form-data', ...authHeaders() }
       });
       setAnalysis(res.data);
     } catch (err) {
@@ -124,6 +186,17 @@ function App() {
       alert("AI Forensic Cluster Offline or Error: " + (err.response?.data?.error || err.message));
     } finally {
       setIsAnalyzing(false);
+    }
+  };
+
+  const fetchSystemHealth = async () => {
+    try {
+      const res = await axios.get(`${API_AI_URL}/api/system/health`, {
+        headers: authHeaders()
+      });
+      setSystemHealth(res.data);
+    } catch (err) {
+      console.error("Health fetch failed", err);
     }
   };
 
@@ -168,7 +241,7 @@ function App() {
 
     try {
       const res = await axios.post(`${API_AI_URL}/analyze`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
+        headers: { 'Content-Type': 'multipart/form-data', ...authHeaders() }
       });
       const fileHash = res.data.sha256;
       const searchRes = await axios.get(`${API_BLOCKCHAIN_URL}/api/evidence`);
@@ -181,79 +254,128 @@ function App() {
     }
   };
 
+  // ---- AUTH GATE ----
+  if (!currentUser) {
+    return <LoginScreen onLogin={handleLogin} />;
+  }
+
   return (
     <div className="flex h-screen bg-slate-950 text-slate-100 font-sans selection:bg-blue-500/30">
 
       {/* --- Sidebar --- */}
       <aside className="w-72 bg-slate-900/50 backdrop-blur-3xl border-r border-white/5 flex flex-col z-30 shadow-[40px_0_100px_-40px_rgba(0,0,0,0.5)]">
-        <div className="p-8 border-b border-white/5 relative overflow-hidden group">
+        <div className="p-6 border-b border-white/5 relative overflow-hidden group">
           <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-600 via-purple-600 to-blue-600 bg-[length:200%_100%] animate-shimmer opacity-50"></div>
-          <div className="flex items-center space-x-4 mb-4">
+          <div className="flex items-center space-x-4 mb-5">
             <div className="w-12 h-12 bg-blue-600 rounded-2xl flex items-center justify-center shadow-2xl shadow-blue-500/20 group-hover:rotate-12 transition-transform duration-500">
               <Shield className="w-7 h-7 text-white" />
             </div>
             <div>
               <h1 className="text-xl font-black tracking-tighter">SECURE<span className="text-blue-500">LOCK</span></h1>
-              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest leading-none">Corda Forensic Node</p>
+              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest leading-none">RBAC Vault Node</p>
             </div>
           </div>
 
-          <div className="bg-slate-950/80 rounded-2xl p-1 flex border border-white/5">
-            <button
-              onClick={() => setRole('officer')}
-              className={`flex-1 py-2 px-3 text-[10px] font-black rounded-xl transition-all flex items-center justify-center space-x-2 ${role === 'officer' ? 'bg-blue-600 text-white shadow-xl' : 'text-slate-500 hover:text-slate-300'}`}
-            >
-              <User className="w-3 h-3" />
-              <span>OFFICER</span>
-            </button>
-            <button
-              onClick={() => setRole('judge')}
-              className={`flex-1 py-2 px-3 text-[10px] font-black rounded-xl transition-all flex items-center justify-center space-x-2 ${role === 'judge' ? 'bg-purple-600 text-white shadow-xl' : 'text-slate-500 hover:text-slate-300'}`}
-            >
-              <FileCheck className="w-3 h-3" />
-              <span>JUDGE</span>
-            </button>
+          {/* Authenticated User Card */}
+          <div className="bg-slate-950/80 rounded-xl p-4 border border-blue-500/10">
+            <div className="flex items-center space-x-3 mb-3">
+              <div className="w-9 h-9 bg-blue-600/20 rounded-lg flex items-center justify-center border border-blue-500/30">
+                <User className="w-4 h-4 text-blue-400" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-xs font-black text-white truncate">{currentUser.display_name}</div>
+                <div className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">{currentUser.badge}</div>
+              </div>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-[8px] font-black text-blue-400 uppercase tracking-widest bg-blue-500/10 px-2 py-1 rounded-md border border-blue-500/20">{currentUser.role}</span>
+              <button onClick={handleLogout}
+                className="flex items-center space-x-1.5 text-[9px] font-black text-red-400/60 hover:text-red-400 uppercase tracking-widest transition-colors">
+                <LogOut className="w-3 h-3" />
+                <span>Logout</span>
+              </button>
+            </div>
+            <div className="mt-2 text-[8px] font-bold text-slate-600 uppercase tracking-widest">{currentUser.clearance}</div>
           </div>
         </div>
 
-        <nav className="flex-1 p-6 space-y-3">
-          {role === 'officer' ? (
+        <nav className="flex-1 p-6 space-y-2 overflow-auto">
+          {/* Officer + Forensic: Upload & OCR */}
+          {perms.can_upload && (
             <>
               <button onClick={() => setActiveTab('upload')} className={`nav-btn ${activeTab === 'upload' && 'active'}`}>
                 <Upload className={`w-5 h-5 ${activeTab === 'upload' ? 'text-blue-400' : 'text-slate-500'}`} />
-                <span>Deposit Case</span>
-              </button>
-              <button onClick={() => setActiveTab('list')} className={`nav-btn ${activeTab === 'list' && 'active'}`}>
-                <Activity className={`w-5 h-5 ${activeTab === 'list' ? 'text-blue-400' : 'text-slate-500'}`} />
-                <span>Forensic Log</span>
+                <span>Deposit Evidence</span>
               </button>
             </>
-          ) : (
+          )}
+          {perms.can_ocr && (
+            <button onClick={() => setActiveTab('ocr')} className={`nav-btn ${activeTab === 'ocr' && 'active'}`}>
+              <Scan className={`w-5 h-5 ${activeTab === 'ocr' ? 'text-blue-400' : 'text-slate-500'}`} />
+              <span>OCR Scanner</span>
+            </button>
+          )}
+          {perms.can_view_evidence && (
+            <button onClick={() => setActiveTab('list')} className={`nav-btn ${activeTab === 'list' && 'active'}`}>
+              <Activity className={`w-5 h-5 ${activeTab === 'list' ? 'text-blue-400' : 'text-slate-500'}`} />
+              <span>{perms.can_view_all ? 'Master Docket' : 'Case Log'}</span>
+            </button>
+          )}
+
+          {/* Judge: Judicial AI + Verification */}
+          {perms.can_judicial_ai && (
             <>
-              <button onClick={() => setActiveTab('verify')} className={`nav-btn ${activeTab === 'verify' && 'active'}`}>
-                <Eye className={`w-5 h-5 ${activeTab === 'verify' ? 'text-purple-400' : 'text-slate-500'}`} />
-                <span>Court Verification</span>
+              <div className="h-px bg-white/5 my-2"></div>
+              <button onClick={() => setActiveTab('judicial')} className={`nav-btn ${activeTab === 'judicial' && 'active'}`}>
+                <Scale className={`w-5 h-5 ${activeTab === 'judicial' ? 'text-amber-400' : 'text-slate-500'}`} />
+                <span>Bench AI</span>
+              </button>
+            </>
+          )}
+          {perms.can_verify && (
+            <button onClick={() => setActiveTab('verify')} className={`nav-btn ${activeTab === 'verify' && 'active'}`}>
+              <Eye className={`w-5 h-5 ${activeTab === 'verify' ? 'text-amber-400' : 'text-slate-500'}`} />
+              <span>Court Verify</span>
+            </button>
+          )}
+
+          {/* Public: Navigator */}
+          {perms.can_navigate && (
+            <>
+              <button onClick={() => setActiveTab('navigator')} className={`nav-btn ${activeTab === 'navigator' && 'active'}`}>
+                <MessageCircle className={`w-5 h-5 ${activeTab === 'navigator' ? 'text-emerald-400' : 'text-slate-500'}`} />
+                <span>Legal Navigator</span>
               </button>
               <button onClick={() => setActiveTab('list')} className={`nav-btn ${activeTab === 'list' && 'active'}`}>
-                <Globe className={`w-5 h-5 ${activeTab === 'list' ? 'text-purple-400' : 'text-slate-500'}`} />
-                <span>Master Docket</span>
+                <Globe className={`w-5 h-5 ${activeTab === 'list' ? 'text-emerald-400' : 'text-slate-500'}`} />
+                <span>Public Ledger</span>
+              </button>
+            </>
+          )}
+
+          {/* Developer: System Health */}
+          {perms.can_system_health && (
+            <>
+              <button onClick={() => { setActiveTab('system'); fetchSystemHealth(); }} className={`nav-btn ${activeTab === 'system' && 'active'}`}>
+                <Wrench className={`w-5 h-5 ${activeTab === 'system' ? 'text-cyan-400' : 'text-slate-500'}`} />
+                <span>System Health</span>
               </button>
             </>
           )}
         </nav>
 
         <div className="p-8 space-y-6">
-          <div className="bg-slate-900/50 rounded-2xl p-4 border border-white/5 relative overflow-hidden">
-            <div className="absolute top-0 right-0 p-2 opacity-10"><Cpu className="w-12 h-12" /></div>
-            <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3">System Health</h4>
+          <div className="bg-slate-950/50 rounded-2xl p-4 border border-blue-500/10 relative overflow-hidden group">
+            <div className="absolute top-0 right-0 p-2 opacity-10 group-hover:opacity-20 transition-opacity"><Terminal className="w-12 h-12" /></div>
+            <h4 className="text-[10px] font-black text-blue-500 uppercase tracking-widest mb-3 neon-text-blue">System Diagnostic</h4>
             <div className="space-y-4">
-              <StatusIndicator label="Corda Consensus" status="Healthy" />
-              <StatusIndicator label="AI Service" status="Online" />
-              <StatusIndicator label="IPFS Gateway" status="Active" color="text-cyan-400" />
+              <StatusIndicator label="Corda Consensus" status="Healthy" color="text-emerald-400" />
+              <StatusIndicator label="AI Forensics" status="Online" color="text-blue-400" />
+              <StatusIndicator label="OCR Cluster" status="Standby" color="text-amber-400" />
             </div>
           </div>
           <div className="text-[9px] font-black text-slate-700 uppercase tracking-[0.3em] text-center">
-            Protocol v2.4.0-Forensic
+            OS // RYME-CITY-PD-V2.4
           </div>
         </div>
       </aside>
@@ -268,6 +390,107 @@ function App() {
         </div>
 
         <div className="p-12 max-w-7xl mx-auto relative z-10">
+
+          {activeTab === 'judicial' && <JudicialAssistant />}
+
+          {activeTab === 'navigator' && <CitizenNavigator />}
+
+          {activeTab === 'ocr' && (
+            <div className="space-y-12 animate-in fade-in duration-700">
+              <header className="text-center space-y-4">
+                <div className="inline-flex items-center space-x-3 px-4 py-1 bg-blue-500/10 border border-blue-500/20 rounded-full">
+                  <Scan className="w-3 h-3 text-blue-500" />
+                  <span className="text-[10px] font-black text-blue-500 uppercase tracking-widest">Digital Scribe // OCR Module</span>
+                </div>
+                <h1 className="text-6xl font-black text-white tracking-tighter uppercase">Physical <span className="text-blue-500 italic">Ingestion</span></h1>
+                <p className="text-slate-500 font-medium max-w-2xl mx-auto">Transform physical case documents into cryptographically verified digital evidence with AI relevance scoring.</p>
+              </header>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
+                <div className="glass-card rounded-3xl p-10 border-blue-500/10">
+                  <div
+                    className={`border-2 border-dashed rounded-2xl p-16 text-center cursor-pointer transition-all ${ocrFile ? 'border-blue-500/50 bg-blue-500/5' : 'border-white/10 hover:border-blue-500/30'}`}
+                    onClick={() => document.getElementById('ocrInput').click()}
+                  >
+                    <input type="file" id="ocrInput" className="hidden" onChange={handleOcrFileChange} />
+                    <Upload className={`w-12 h-12 mx-auto mb-6 ${ocrFile ? 'text-blue-500' : 'text-slate-700'}`} />
+                    <h3 className="text-xl font-bold mb-2">{ocrFile ? ocrFile.name : 'Upload Document Image'}</h3>
+                    <p className="text-xs text-slate-500">Supports JPG, PNG, PDF (Scanned)</p>
+                  </div>
+                  {ocrFile && (
+                    <button
+                      onClick={runOcrScan}
+                      disabled={isScanning}
+                      className="w-full mt-8 py-5 bg-blue-600 hover:bg-blue-500 text-white font-black uppercase tracking-widest rounded-xl shadow-lg transition-all flex items-center justify-center"
+                    >
+                      {isScanning ? <Activity className="animate-spin mr-3" /> : <BioIcon className="mr-3 w-4 h-4" />}
+                      {isScanning ? 'Extracting Neural Data...' : 'Initiate OCR Scan'}
+                    </button>
+                  )}
+                </div>
+
+                <div className="space-y-8">
+                  {ocrResult ? (
+                    <div className="animate-in slide-in-from-right duration-700 space-y-8">
+                      <div className="glass-card rounded-3xl p-8 border-blue-500/10">
+                        <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-4 flex items-center">
+                          <Terminal className="w-3 h-3 mr-2 text-blue-400" /> Extracted Buffer
+                        </h4>
+                        <div className="bg-slate-950/80 p-6 rounded-xl border border-white/5 font-mono text-xs text-blue-300 leading-relaxed max-h-[300px] overflow-auto">
+                          {ocrResult.extracted_text}
+                        </div>
+                        <div className="mt-4 flex items-center justify-between text-[10px] font-bold text-slate-600 uppercase tracking-widest">
+                          <span>Engine: {ocrResult.ocr_engine}</span>
+                          <span className="text-blue-500">{ocrResult.extracted_text.length} Characters Detected</span>
+                        </div>
+                      </div>
+
+                      <div className={`glass-card rounded-3xl p-8 border-2 ${ocrResult.verification.is_relevant ? 'border-emerald-500/20' : 'border-red-500/20'}`}>
+                        <div className="flex items-center justify-between mb-6">
+                          <div>
+                            <h4 className="text-xs font-black text-slate-300 uppercase tracking-widest">AI Content Verification</h4>
+                            <p className="text-[10px] text-slate-500 mt-1">{ocrResult.verification.relevance_explanation}</p>
+                          </div>
+                          <div className={`px-4 py-2 rounded-xl text-[11px] font-black uppercase tracking-widest ${ocrResult.verification.is_relevant ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-red-500/20 text-red-400 border border-red-500/30'}`}>
+                            {ocrResult.verification.is_relevant ? 'Legally Relevant' : 'Non-Actionable'}
+                          </div>
+                        </div>
+
+                        {ocrResult.verification.is_relevant && (
+                          <div className="space-y-4">
+                            <div className="flex items-center space-x-4">
+                              <div className="flex-1 bg-slate-950/50 p-4 rounded-xl border border-white/5">
+                                <span className="text-[9px] font-black text-slate-600 uppercase tracking-widest block mb-1">Inferred Provision</span>
+                                <span className="text-sm font-bold text-white">{ocrResult.verification.primary_law} ({ocrResult.verification.primary_section})</span>
+                              </div>
+                              <div className="bg-slate-950/50 p-4 rounded-xl border border-white/5 text-center px-8">
+                                <span className="text-[9px] font-black text-slate-600 uppercase tracking-widest block mb-1">Trust Score</span>
+                                <span className="text-sm font-black text-emerald-400">{Math.round(ocrResult.verification.trust_score * 100)}%</span>
+                              </div>
+                            </div>
+                            <div className="bg-slate-950/50 p-4 rounded-xl border border-white/5">
+                              <span className="text-[9px] font-black text-slate-600 uppercase tracking-widest block mb-2">Detected Legal Entities</span>
+                              <div className="flex flex-wrap gap-2">
+                                {ocrResult.verification.detected_entities.map((ent, i) => (
+                                  <span key={i} className="px-3 py-1 bg-blue-500/10 text-blue-400 text-[10px] font-bold rounded-lg border border-blue-500/20 uppercase tracking-widest">{ent}</span>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="glass-card rounded-3xl p-16 text-center border-dashed border-white/5 flex flex-col items-center justify-center min-h-[500px]">
+                      <Terminal className="w-16 h-16 text-slate-800 mb-8 animate-pulse" />
+                      <h3 className="text-2xl font-black text-slate-600 mb-4 tracking-tighter">Neural Ingest Standby</h3>
+                      <p className="text-sm text-slate-500 max-w-xs font-medium">Please upload a document image to begin optical character extraction and AI legal verification.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
 
           {activeTab === 'upload' && (
             <div className="space-y-12 animate-in fade-in slide-in-from-bottom-8 duration-1000">
@@ -554,7 +777,7 @@ function App() {
                             </div>
                             <h2 className="text-6xl font-black text-white tracking-tighter">INVALID</h2>
                             <p className="text-red-500 font-black uppercase tracking-[0.4em] text-xs">Security Protocol Violation</p>
-                            <div className="mt-6 p-8 bg-red-950/20 border border-red-500/20 rounded-[2rem] text-red-100 text-sm leading-relaxed font-medium">
+                            <div className="mt-8 p-8 bg-red-950/20 border border-red-500/20 rounded-[2rem] text-red-100 text-sm leading-relaxed font-medium">
                               The presented asset has NO matching record on the R3 Corda network.
                               Admitting this file into evidence would violate cryptographic chain-of-custody rules.
                             </div>
@@ -568,6 +791,100 @@ function App() {
                   )}
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* Developer System Health Dashboard */}
+          {activeTab === 'system' && perms.can_system_health && (
+            <div className="space-y-12 animate-in fade-in slide-in-from-bottom-8 duration-700">
+              <header className="flex items-center justify-between">
+                <div className="space-y-2">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-3 h-3 bg-cyan-500 animate-pulse rounded-full shadow-[0_0_15px_rgba(6,182,212,0.8)]"></div>
+                    <span className="text-xs font-black text-cyan-500 uppercase tracking-[0.2em]">System Maintenance Mode</span>
+                  </div>
+                  <h1 className="text-5xl font-black text-white tracking-tighter">Infra <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-300">Health</span></h1>
+                </div>
+                <button onClick={fetchSystemHealth} className="p-4 bg-slate-900 rounded-2xl border border-white/5 hover:border-cyan-500/30 transition-all text-cyan-400">
+                  <Activity className="w-6 h-6" />
+                </button>
+              </header>
+
+              {systemHealth ? (
+                <div className="space-y-8">
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div className="glass-card rounded-2xl p-6 border-cyan-500/10 text-center">
+                      <Cpu className="w-6 h-6 text-cyan-400 mx-auto mb-3" />
+                      <div className="text-2xl font-black text-white">{systemHealth.system.cpu_percent}%</div>
+                      <div className="text-[9px] font-black text-slate-600 uppercase tracking-widest">CPU Load</div>
+                    </div>
+                    <div className="glass-card rounded-2xl p-6 border-cyan-500/10 text-center">
+                      <HardDrive className="w-6 h-6 text-purple-400 mx-auto mb-3" />
+                      <div className="text-2xl font-black text-white">{systemHealth.system.memory_percent}%</div>
+                      <div className="text-[9px] font-black text-slate-600 uppercase tracking-widest">RAM Used</div>
+                    </div>
+                    <div className="glass-card rounded-2xl p-6 border-cyan-500/10 text-center">
+                      <Database className="w-6 h-6 text-blue-400 mx-auto mb-3" />
+                      <div className="text-2xl font-black text-white">{systemHealth.system.disk_percent}%</div>
+                      <div className="text-[9px] font-black text-slate-600 uppercase tracking-widest">Disk Used</div>
+                    </div>
+                    <div className="glass-card rounded-2xl p-6 border-cyan-500/10 text-center">
+                      <Users className="w-6 h-6 text-emerald-400 mx-auto mb-3" />
+                      <div className="text-2xl font-black text-white">{systemHealth.active_sessions}</div>
+                      <div className="text-[9px] font-black text-slate-600 uppercase tracking-widest">Sessions</div>
+                    </div>
+                  </div>
+
+                  <div className="glass-card rounded-3xl p-8 border-cyan-500/10">
+                    <h4 className="text-[10px] font-black text-cyan-400 uppercase tracking-widest mb-6 flex items-center">
+                      <Wifi className="w-3 h-3 mr-2" /> Service Status Matrix
+                    </h4>
+                    <div className="grid grid-cols-2 gap-4">
+                      {Object.entries(systemHealth.services).map(([svc, status]) => (
+                        <div key={svc} className="flex items-center justify-between p-4 bg-slate-950/60 rounded-xl border border-white/5">
+                          <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">{svc.replace(/_/g, ' ')}</span>
+                          <span className={`text-[9px] font-black uppercase tracking-widest px-3 py-1 rounded-lg border ${status === 'online' || status === 'active' ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' :
+                              status === 'standby' ? 'text-amber-400 bg-amber-500/10 border-amber-500/20' :
+                                'text-slate-500 bg-slate-800 border-slate-700'
+                            }`}>{status}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="glass-card rounded-3xl p-8 border-cyan-500/10">
+                    <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-6 flex items-center">
+                      <Terminal className="w-3 h-3 mr-2 text-cyan-400" /> Resource Allocation
+                    </h4>
+                    <div className="grid grid-cols-3 gap-6">
+                      <div className="bg-slate-950/60 p-5 rounded-xl border border-white/5">
+                        <div className="text-[9px] font-black text-slate-600 uppercase tracking-widest mb-2">Total RAM</div>
+                        <div className="text-lg font-black text-white">{systemHealth.system.memory_total_gb} GB</div>
+                      </div>
+                      <div className="bg-slate-950/60 p-5 rounded-xl border border-white/5">
+                        <div className="text-[9px] font-black text-slate-600 uppercase tracking-widest mb-2">RAM Used</div>
+                        <div className="text-lg font-black text-white">{systemHealth.system.memory_used_gb} GB</div>
+                      </div>
+                      <div className="bg-slate-950/60 p-5 rounded-xl border border-white/5">
+                        <div className="text-[9px] font-black text-slate-600 uppercase tracking-widest mb-2">Disk Total</div>
+                        <div className="text-lg font-black text-white">{systemHealth.system.disk_total_gb} GB</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="p-6 bg-slate-950/50 rounded-2xl border border-white/5">
+                    <p className="text-[10px] text-slate-600 font-bold uppercase tracking-widest">
+                      ⚠ Developer role has ZERO access to evidence or case data. System metrics only.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="glass-card rounded-3xl p-16 text-center border-dashed border-white/5 flex flex-col items-center justify-center">
+                  <Wrench className="w-16 h-16 text-slate-800 mb-8 animate-pulse" />
+                  <h3 className="text-2xl font-black text-slate-600 mb-4 uppercase tracking-tighter">Loading Diagnostics</h3>
+                  <p className="text-sm text-slate-500 font-medium">Fetching real-time system telemetry...</p>
+                </div>
+              )}
             </div>
           )}
 
