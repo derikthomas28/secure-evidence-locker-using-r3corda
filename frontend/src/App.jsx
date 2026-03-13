@@ -2,16 +2,22 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import {
   Upload, Shield, FileText, CheckCircle, AlertTriangle, Eye, Server, Activity,
-  Lock, Key, Navigation, Globe, Cpu, Hash, Clock, User, Download, FileCheck, ArrowRight
+  Lock, Key, Navigation, Globe, Cpu, Hash, Clock, User, Download, FileCheck, ArrowRight,
+  Scale, Users, MessageCircle, Scan, Terminal, BarChart3, Fingerprint as BioIcon,
+  LogOut, Wrench, HardDrive, Wifi, Database
 } from 'lucide-react';
+import JudicialAssistant from './JudicialAssistant';
+import CitizenNavigator from './CitizenNavigator';
+import LoginScreen from './LoginScreen';
 
 const API_AI_URL = "http://localhost:5000";
 const API_BLOCKCHAIN_URL = "http://localhost:10050";
 
 // --- UI Components ---
 
-const TrustScore = ({ score }) => {
-  const color = score > 80 ? 'text-green-400' : score > 50 ? 'text-yellow-400' : 'text-red-400';
+const TrustScore = ({ score, label }) => {
+  const color = score > 80 ? 'text-green-400' : score > 60 ? 'text-emerald-400' : score > 40 ? 'text-yellow-400' : score > 20 ? 'text-orange-400' : 'text-red-400';
+  const labelColor = score > 80 ? 'bg-green-500/10 text-green-400 border-green-500/30' : score > 60 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : score > 40 ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/30' : score > 20 ? 'bg-orange-500/10 text-orange-400 border-orange-500/30' : 'bg-red-500/10 text-red-400 border-red-500/30';
   return (
     <div className="relative flex flex-col items-center">
       <svg className="w-32 h-32 transform -rotate-90">
@@ -27,6 +33,11 @@ const TrustScore = ({ score }) => {
         <span className={`text-3xl font-black ${color}`}>{score}%</span>
         <span className="text-[10px] uppercase tracking-widest font-bold text-slate-500">Trust Index</span>
       </div>
+      {label && (
+        <div className={`mt-3 px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest border ${labelColor}`}>
+          {label}
+        </div>
+      )}
     </div>
   );
 };
@@ -54,9 +65,16 @@ const TimelineItem = ({ title, date, active, completed, icon: Icon }) => (
 // --- Main App ---
 
 function App() {
-  const [role, setRole] = useState('officer');
+  // Auth state
+  const [currentUser, setCurrentUser] = useState(null);
+  const [authToken, setAuthToken] = useState(null);
+
+  const role = currentUser?.role || null;
+  const perms = currentUser?.permissions || {};
+
   const [activeTab, setActiveTab] = useState('upload');
   const [file, setFile] = useState(null);
+  const [evidenceType, setEvidenceType] = useState('photo'); // 'photo' or 'document'
   const [analysis, setAnalysis] = useState(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -69,12 +87,45 @@ function App() {
   const [isVerifying, setIsVerifying] = useState(false);
   const [showCert, setShowCert] = useState(null);
   const [evidenceList, setEvidenceList] = useState([]);
+  const [ocrResult, setOcrResult] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState(null);
+  const [showFullPreview, setShowFullPreview] = useState(false);
+  const [ocrFile, setOcrFile] = useState(null);
+  const [isScanning, setIsScanning] = useState(false);
+  const [systemHealth, setSystemHealth] = useState(null);
+
+  // Auth helper: create axios instance with token
+  const authHeaders = () => authToken ? { 'X-Auth-Token': authToken } : {};
+
+  const handleLogin = (data) => {
+    setAuthToken(data.token);
+    setCurrentUser(data);
+    // Set default tab based on role
+    if (data.role === 'judge') setActiveTab('judicial');
+    else if (data.role === 'public') setActiveTab('navigator');
+    else if (data.role === 'developer') setActiveTab('system');
+    else if (data.role === 'officer' || data.role === 'forensic') setActiveTab('upload');
+  };
+
+  const handleLogout = async () => {
+    try {
+      await fetch(`${API_AI_URL}/api/auth/logout`, {
+        method: 'POST',
+        headers: authHeaders()
+      });
+    } catch (e) { }
+    setCurrentUser(null);
+    setAuthToken(null);
+    setActiveTab('upload');
+    setAnalysis(null);
+    setOcrResult(null);
+    setVerifyResult(null);
+    setSystemHealth(null);
+  };
 
   useEffect(() => {
-    fetchEvidence();
-    if (role === 'judge') setActiveTab('verify');
-    else if (role === 'officer' && activeTab === 'verify') setActiveTab('upload');
-  }, [role]);
+    if (currentUser) fetchEvidence();
+  }, [currentUser]);
 
   const fetchEvidence = async () => {
     try {
@@ -87,12 +138,33 @@ function App() {
 
   const handleFileChange = (e) => {
     if (e.target.files && e.target.files[0]) {
-      setFile(e.target.files[0]);
+      const selectedFile = e.target.files[0];
+      setFile(selectedFile);
       setAnalysis(null);
       setSuccessMsg('');
       setSigningStep(false);
       setIsSigned(false);
+
+      // Generate preview for images
+      if (selectedFile.type.startsWith('image/')) {
+        const url = URL.createObjectURL(selectedFile);
+        setPreviewUrl(url);
+      } else {
+        setPreviewUrl(null);
+      }
     }
+  };
+
+  const resetUpload = () => {
+    setFile(null);
+    setAnalysis(null);
+    setSuccessMsg('');
+    setSigningStep(false);
+    setIsSigned(false);
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewUrl(null);
+    const fileInput = document.getElementById('fileInput');
+    if (fileInput) fileInput.value = '';
   };
 
   const handleVerifyFileChange = (e) => {
@@ -102,28 +174,70 @@ function App() {
     }
   };
 
-  const analyzeEvidence = async () => {
-    console.log("Analyze clicked", file);
-    if (!file) {
-      alert("No file selected!");
-      return;
+  const handleOcrFileChange = (e) => {
+    if (e.target.files && e.target.files[0]) {
+      setOcrFile(e.target.files[0]);
+      setOcrResult(null);
     }
+  };
 
+  const runOcrScan = async () => {
+    if (!ocrFile) return;
+    setIsScanning(true);
+    const formData = new FormData();
+    formData.append('file', ocrFile);
+
+    try {
+      const res = await axios.post(`${API_AI_URL}/api/officer/ocr-scan`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data', ...authHeaders() }
+      });
+      setOcrResult(res.data);
+    } catch (err) {
+      if (err.response?.status === 401) {
+        handleLogout();
+        alert("Session expired. Please log in again.");
+        return;
+      }
+      console.error("OCR Scan Error", err);
+      alert("System Error: " + (err.response?.data?.error || err.message));
+    } finally {
+      setIsScanning(false);
+    }
+  };
+
+  const analyzeEvidence = async () => {
+    if (!file) { alert("No file selected!"); return; }
     setIsAnalyzing(true);
     const formData = new FormData();
     formData.append('file', file);
 
-    console.log("Sending request to:", `${API_AI_URL}/analyze`);
     try {
+      formData.append('evidence_type', evidenceType);
       const res = await axios.post(`${API_AI_URL}/analyze`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
+        headers: { 'Content-Type': 'multipart/form-data', ...authHeaders() }
       });
       setAnalysis(res.data);
     } catch (err) {
-      console.error("Analysis failed", err);
-      alert("AI Forensic Cluster Offline or Error: " + (err.response?.data?.error || err.message));
+      if (err.response?.status === 401) {
+        handleLogout();
+        alert("Session expired. Please log in again.");
+        return;
+      }
+      console.error("Analysis Error", err);
+      alert("System Error: " + (err.response?.data?.error || err.message));
     } finally {
       setIsAnalyzing(false);
+    }
+  };
+
+  const fetchSystemHealth = async () => {
+    try {
+      const res = await axios.get(`${API_AI_URL}/api/system/health`, {
+        headers: authHeaders()
+      });
+      setSystemHealth(res.data);
+    } catch (err) {
+      console.error("Health fetch failed", err);
     }
   };
 
@@ -168,7 +282,7 @@ function App() {
 
     try {
       const res = await axios.post(`${API_AI_URL}/analyze`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
+        headers: { 'Content-Type': 'multipart/form-data', ...authHeaders() }
       });
       const fileHash = res.data.sha256;
       const searchRes = await axios.get(`${API_BLOCKCHAIN_URL}/api/evidence`);
@@ -181,79 +295,128 @@ function App() {
     }
   };
 
+  // ---- AUTH GATE ----
+  if (!currentUser) {
+    return <LoginScreen onLogin={handleLogin} />;
+  }
+
   return (
     <div className="flex h-screen bg-slate-950 text-slate-100 font-sans selection:bg-blue-500/30">
 
       {/* --- Sidebar --- */}
       <aside className="w-72 bg-slate-900/50 backdrop-blur-3xl border-r border-white/5 flex flex-col z-30 shadow-[40px_0_100px_-40px_rgba(0,0,0,0.5)]">
-        <div className="p-8 border-b border-white/5 relative overflow-hidden group">
+        <div className="p-6 border-b border-white/5 relative overflow-hidden group">
           <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-600 via-purple-600 to-blue-600 bg-[length:200%_100%] animate-shimmer opacity-50"></div>
-          <div className="flex items-center space-x-4 mb-4">
+          <div className="flex items-center space-x-4 mb-5">
             <div className="w-12 h-12 bg-blue-600 rounded-2xl flex items-center justify-center shadow-2xl shadow-blue-500/20 group-hover:rotate-12 transition-transform duration-500">
               <Shield className="w-7 h-7 text-white" />
             </div>
             <div>
               <h1 className="text-xl font-black tracking-tighter">SECURE<span className="text-blue-500">LOCK</span></h1>
-              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest leading-none">Corda Forensic Node</p>
+              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest leading-none">RBAC Vault Node</p>
             </div>
           </div>
 
-          <div className="bg-slate-950/80 rounded-2xl p-1 flex border border-white/5">
-            <button
-              onClick={() => setRole('officer')}
-              className={`flex-1 py-2 px-3 text-[10px] font-black rounded-xl transition-all flex items-center justify-center space-x-2 ${role === 'officer' ? 'bg-blue-600 text-white shadow-xl' : 'text-slate-500 hover:text-slate-300'}`}
-            >
-              <User className="w-3 h-3" />
-              <span>OFFICER</span>
-            </button>
-            <button
-              onClick={() => setRole('judge')}
-              className={`flex-1 py-2 px-3 text-[10px] font-black rounded-xl transition-all flex items-center justify-center space-x-2 ${role === 'judge' ? 'bg-purple-600 text-white shadow-xl' : 'text-slate-500 hover:text-slate-300'}`}
-            >
-              <FileCheck className="w-3 h-3" />
-              <span>JUDGE</span>
-            </button>
+          {/* Authenticated User Card */}
+          <div className="bg-slate-950/80 rounded-xl p-4 border border-blue-500/10">
+            <div className="flex items-center space-x-3 mb-3">
+              <div className="w-9 h-9 bg-blue-600/20 rounded-lg flex items-center justify-center border border-blue-500/30">
+                <User className="w-4 h-4 text-blue-400" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-xs font-black text-white truncate">{currentUser.display_name}</div>
+                <div className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">{currentUser.badge}</div>
+              </div>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-[8px] font-black text-blue-400 uppercase tracking-widest bg-blue-500/10 px-2 py-1 rounded-md border border-blue-500/20">{currentUser.role}</span>
+              <button onClick={handleLogout}
+                className="flex items-center space-x-1.5 text-[9px] font-black text-red-400/60 hover:text-red-400 uppercase tracking-widest transition-colors">
+                <LogOut className="w-3 h-3" />
+                <span>Logout</span>
+              </button>
+            </div>
+            <div className="mt-2 text-[8px] font-bold text-slate-600 uppercase tracking-widest">{currentUser.clearance}</div>
           </div>
         </div>
 
-        <nav className="flex-1 p-6 space-y-3">
-          {role === 'officer' ? (
+        <nav className="flex-1 p-6 space-y-2 overflow-auto">
+          {/* Officer + Forensic: Upload & OCR */}
+          {perms.can_upload && (
             <>
               <button onClick={() => setActiveTab('upload')} className={`nav-btn ${activeTab === 'upload' && 'active'}`}>
                 <Upload className={`w-5 h-5 ${activeTab === 'upload' ? 'text-blue-400' : 'text-slate-500'}`} />
-                <span>Deposit Case</span>
-              </button>
-              <button onClick={() => setActiveTab('list')} className={`nav-btn ${activeTab === 'list' && 'active'}`}>
-                <Activity className={`w-5 h-5 ${activeTab === 'list' ? 'text-blue-400' : 'text-slate-500'}`} />
-                <span>Forensic Log</span>
+                <span>Deposit Evidence</span>
               </button>
             </>
-          ) : (
+          )}
+          {perms.can_ocr && (
+            <button onClick={() => setActiveTab('ocr')} className={`nav-btn ${activeTab === 'ocr' && 'active'}`}>
+              <Scan className={`w-5 h-5 ${activeTab === 'ocr' ? 'text-blue-400' : 'text-slate-500'}`} />
+              <span>OCR Scanner</span>
+            </button>
+          )}
+          {perms.can_view_evidence && (
+            <button onClick={() => setActiveTab('list')} className={`nav-btn ${activeTab === 'list' && 'active'}`}>
+              <Activity className={`w-5 h-5 ${activeTab === 'list' ? 'text-blue-400' : 'text-slate-500'}`} />
+              <span>{perms.can_view_all ? 'Master Docket' : 'Case Log'}</span>
+            </button>
+          )}
+
+          {/* Judge: Judicial AI + Verification */}
+          {perms.can_judicial_ai && (
             <>
-              <button onClick={() => setActiveTab('verify')} className={`nav-btn ${activeTab === 'verify' && 'active'}`}>
-                <Eye className={`w-5 h-5 ${activeTab === 'verify' ? 'text-purple-400' : 'text-slate-500'}`} />
-                <span>Court Verification</span>
+              <div className="h-px bg-white/5 my-2"></div>
+              <button onClick={() => setActiveTab('judicial')} className={`nav-btn ${activeTab === 'judicial' && 'active'}`}>
+                <Scale className={`w-5 h-5 ${activeTab === 'judicial' ? 'text-amber-400' : 'text-slate-500'}`} />
+                <span>Bench AI</span>
+              </button>
+            </>
+          )}
+          {perms.can_verify && (
+            <button onClick={() => setActiveTab('verify')} className={`nav-btn ${activeTab === 'verify' && 'active'}`}>
+              <Eye className={`w-5 h-5 ${activeTab === 'verify' ? 'text-amber-400' : 'text-slate-500'}`} />
+              <span>Court Verify</span>
+            </button>
+          )}
+
+          {/* Public: Navigator */}
+          {perms.can_navigate && (
+            <>
+              <button onClick={() => setActiveTab('navigator')} className={`nav-btn ${activeTab === 'navigator' && 'active'}`}>
+                <MessageCircle className={`w-5 h-5 ${activeTab === 'navigator' ? 'text-emerald-400' : 'text-slate-500'}`} />
+                <span>Legal Navigator</span>
               </button>
               <button onClick={() => setActiveTab('list')} className={`nav-btn ${activeTab === 'list' && 'active'}`}>
-                <Globe className={`w-5 h-5 ${activeTab === 'list' ? 'text-purple-400' : 'text-slate-500'}`} />
-                <span>Master Docket</span>
+                <Globe className={`w-5 h-5 ${activeTab === 'list' ? 'text-emerald-400' : 'text-slate-500'}`} />
+                <span>Public Ledger</span>
+              </button>
+            </>
+          )}
+
+          {/* Developer: System Health */}
+          {perms.can_system_health && (
+            <>
+              <button onClick={() => { setActiveTab('system'); fetchSystemHealth(); }} className={`nav-btn ${activeTab === 'system' && 'active'}`}>
+                <Wrench className={`w-5 h-5 ${activeTab === 'system' ? 'text-cyan-400' : 'text-slate-500'}`} />
+                <span>System Health</span>
               </button>
             </>
           )}
         </nav>
 
         <div className="p-8 space-y-6">
-          <div className="bg-slate-900/50 rounded-2xl p-4 border border-white/5 relative overflow-hidden">
-            <div className="absolute top-0 right-0 p-2 opacity-10"><Cpu className="w-12 h-12" /></div>
-            <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3">System Health</h4>
+          <div className="bg-slate-950/50 rounded-2xl p-4 border border-blue-500/10 relative overflow-hidden group">
+            <div className="absolute top-0 right-0 p-2 opacity-10 group-hover:opacity-20 transition-opacity"><Terminal className="w-12 h-12" /></div>
+            <h4 className="text-[10px] font-black text-blue-500 uppercase tracking-widest mb-3 neon-text-blue">System Diagnostic</h4>
             <div className="space-y-4">
-              <StatusIndicator label="Corda Consensus" status="Healthy" />
-              <StatusIndicator label="AI Service" status="Online" />
-              <StatusIndicator label="IPFS Gateway" status="Active" color="text-cyan-400" />
+              <StatusIndicator label="Corda Consensus" status="Healthy" color="text-emerald-400" />
+              <StatusIndicator label="AI Forensics" status="Online" color="text-blue-400" />
+              <StatusIndicator label="OCR Cluster" status="Standby" color="text-amber-400" />
             </div>
           </div>
           <div className="text-[9px] font-black text-slate-700 uppercase tracking-[0.3em] text-center">
-            Protocol v2.4.0-Forensic
+            OS // RYME-CITY-PD-V2.4
           </div>
         </div>
       </aside>
@@ -268,6 +431,107 @@ function App() {
         </div>
 
         <div className="p-12 max-w-7xl mx-auto relative z-10">
+
+          {activeTab === 'judicial' && <JudicialAssistant authHeaders={authHeaders} handleLogout={handleLogout} />}
+
+          {activeTab === 'navigator' && <CitizenNavigator authHeaders={authHeaders} handleLogout={handleLogout} />}
+
+          {activeTab === 'ocr' && (
+            <div className="space-y-12 animate-in fade-in duration-700">
+              <header className="text-center space-y-4">
+                <div className="inline-flex items-center space-x-3 px-4 py-1 bg-blue-500/10 border border-blue-500/20 rounded-full">
+                  <Scan className="w-3 h-3 text-blue-500" />
+                  <span className="text-[10px] font-black text-blue-500 uppercase tracking-widest">Digital Scribe // OCR Module</span>
+                </div>
+                <h1 className="text-6xl font-black text-white tracking-tighter uppercase">Physical <span className="text-blue-500 italic">Ingestion</span></h1>
+                <p className="text-slate-500 font-medium max-w-2xl mx-auto">Transform physical case documents into cryptographically verified digital evidence with AI relevance scoring.</p>
+              </header>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
+                <div className="glass-card rounded-3xl p-10 border-blue-500/10">
+                  <div
+                    className={`border-2 border-dashed rounded-2xl p-16 text-center cursor-pointer transition-all ${ocrFile ? 'border-blue-500/50 bg-blue-500/5' : 'border-white/10 hover:border-blue-500/30'}`}
+                    onClick={() => document.getElementById('ocrInput').click()}
+                  >
+                    <input type="file" id="ocrInput" className="hidden" onChange={handleOcrFileChange} />
+                    <Upload className={`w-12 h-12 mx-auto mb-6 ${ocrFile ? 'text-blue-500' : 'text-slate-700'}`} />
+                    <h3 className="text-xl font-bold mb-2">{ocrFile ? ocrFile.name : 'Upload Document Image'}</h3>
+                    <p className="text-xs text-slate-500">Supports JPG, PNG, PDF (Scanned)</p>
+                  </div>
+                  {ocrFile && (
+                    <button
+                      onClick={runOcrScan}
+                      disabled={isScanning}
+                      className="w-full mt-8 py-5 bg-blue-600 hover:bg-blue-500 text-white font-black uppercase tracking-widest rounded-xl shadow-lg transition-all flex items-center justify-center"
+                    >
+                      {isScanning ? <Activity className="animate-spin mr-3" /> : <BioIcon className="mr-3 w-4 h-4" />}
+                      {isScanning ? 'Extracting Neural Data...' : 'Initiate OCR Scan'}
+                    </button>
+                  )}
+                </div>
+
+                <div className="space-y-8">
+                  {ocrResult ? (
+                    <div className="animate-in slide-in-from-right duration-700 space-y-8">
+                      <div className="glass-card rounded-3xl p-8 border-blue-500/10">
+                        <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-4 flex items-center">
+                          <Terminal className="w-3 h-3 mr-2 text-blue-400" /> Extracted Buffer
+                        </h4>
+                        <div className="bg-slate-950/80 p-6 rounded-xl border border-white/5 font-mono text-xs text-blue-300 leading-relaxed max-h-[300px] overflow-auto">
+                          {ocrResult.extracted_text}
+                        </div>
+                        <div className="mt-4 flex items-center justify-between text-[10px] font-bold text-slate-600 uppercase tracking-widest">
+                          <span>Engine: {ocrResult.ocr_engine}</span>
+                          <span className="text-blue-500">{ocrResult.extracted_text.length} Characters Detected</span>
+                        </div>
+                      </div>
+
+                      <div className={`glass-card rounded-3xl p-8 border-2 ${ocrResult.verification.is_relevant ? 'border-emerald-500/20' : 'border-red-500/20'}`}>
+                        <div className="flex items-center justify-between mb-6">
+                          <div>
+                            <h4 className="text-xs font-black text-slate-300 uppercase tracking-widest">AI Content Verification</h4>
+                            <p className="text-[10px] text-slate-500 mt-1">{ocrResult.verification.relevance_explanation}</p>
+                          </div>
+                          <div className={`px-4 py-2 rounded-xl text-[11px] font-black uppercase tracking-widest ${ocrResult.verification.is_relevant ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-red-500/20 text-red-400 border border-red-500/30'}`}>
+                            {ocrResult.verification.is_relevant ? 'Legally Relevant' : 'Non-Actionable'}
+                          </div>
+                        </div>
+
+                        {ocrResult.verification.is_relevant && (
+                          <div className="space-y-4">
+                            <div className="flex items-center space-x-4">
+                              <div className="flex-1 bg-slate-950/50 p-4 rounded-xl border border-white/5">
+                                <span className="text-[9px] font-black text-slate-600 uppercase tracking-widest block mb-1">Inferred Provision</span>
+                                <span className="text-sm font-bold text-white">{ocrResult.verification.primary_law} ({ocrResult.verification.primary_section})</span>
+                              </div>
+                              <div className="bg-slate-950/50 p-4 rounded-xl border border-white/5 text-center px-8">
+                                <span className="text-[9px] font-black text-slate-600 uppercase tracking-widest block mb-1">Trust Score</span>
+                                <span className="text-sm font-black text-emerald-400">{Math.round(ocrResult.verification.trust_score * 100)}%</span>
+                              </div>
+                            </div>
+                            <div className="bg-slate-950/50 p-4 rounded-xl border border-white/5">
+                              <span className="text-[9px] font-black text-slate-600 uppercase tracking-widest block mb-2">Detected Legal Entities</span>
+                              <div className="flex flex-wrap gap-2">
+                                {ocrResult.verification.detected_entities.map((ent, i) => (
+                                  <span key={i} className="px-3 py-1 bg-blue-500/10 text-blue-400 text-[10px] font-bold rounded-lg border border-blue-500/20 uppercase tracking-widest">{ent}</span>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="glass-card rounded-3xl p-16 text-center border-dashed border-white/5 flex flex-col items-center justify-center min-h-[500px]">
+                      <Terminal className="w-16 h-16 text-slate-800 mb-8 animate-pulse" />
+                      <h3 className="text-2xl font-black text-slate-600 mb-4 tracking-tighter">Neural Ingest Standby</h3>
+                      <p className="text-sm text-slate-500 max-w-xs font-medium">Please upload a document image to begin optical character extraction and AI legal verification.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
 
           {activeTab === 'upload' && (
             <div className="space-y-12 animate-in fade-in slide-in-from-bottom-8 duration-1000">
@@ -286,6 +550,18 @@ function App() {
                 {/* Left: Upload Workflow */}
                 <div className="lg:col-span-8 space-y-10">
 
+                  {/* Evidence Type Toggle */}
+                  <div className="glass-card rounded-2xl p-2 flex border border-white/5 mb-8">
+                    <button onClick={() => setEvidenceType('photo')}
+                      className={`flex-1 py-3 px-4 text-xs font-black rounded-xl transition-all flex items-center justify-center space-x-2 ${evidenceType === 'photo' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30' : 'text-slate-500 hover:text-slate-300'}`}>
+                      <Eye className="w-4 h-4" /><span>PHOTO EVIDENCE</span>
+                    </button>
+                    <button onClick={() => setEvidenceType('document')}
+                      className={`flex-1 py-3 px-4 text-xs font-black rounded-xl transition-all flex items-center justify-center space-x-2 ${evidenceType === 'document' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30' : 'text-slate-500 hover:text-slate-300'}`}>
+                      <FileText className="w-4 h-4" /><span>DOCUMENT / RECORD</span>
+                    </button>
+                  </div>
+
                   {/* Step 1: Upload */}
                   <div className="glass-card rounded-[2.5rem] p-12 border-white/5 relative group overflow-hidden">
                     <div className="absolute inset-0 bg-blue-600 opacity-0 group-hover:opacity-[0.02] transition-opacity duration-700"></div>
@@ -298,22 +574,46 @@ function App() {
                           <div className="w-24 h-24 bg-slate-900 rounded-3xl flex items-center justify-center mb-8 shadow-inner ring-1 ring-white/5 group-hover:scale-110 transition-transform duration-500">
                             <Upload className="w-10 h-10 text-blue-400" />
                           </div>
-                          <h3 className="text-2xl font-black mb-4">Ingest Primary Evidence</h3>
-                          <p className="text-slate-400 max-w-xs font-medium text-sm leading-relaxed">Drag and drop the source file. System will automatically initiate forensic clustering.</p>
+                          <h3 className="text-2xl font-black mb-4">{evidenceType === 'photo' ? 'Upload Evidence Photo' : 'Upload Legal Document'}</h3>
+                          <p className="text-slate-400 max-w-xs font-medium text-sm leading-relaxed">{evidenceType === 'photo'
+                            ? (role === 'officer' ? 'Crime scene, injury, weapon, property photos. AI will analyze visual forensics.'
+                              : role === 'forensic' ? 'Upload forensic photos for lab-grade AI analysis and evidence classification.'
+                                : role === 'judge' ? 'View uploaded evidence photos with AI forensic classification.'
+                                  : 'Upload evidence images — supports criminal, civil, family, medical, financial cases.')
+                            : (role === 'officer' ? 'FIR, charge sheet, criminal record, property deed, contract, court order.'
+                              : role === 'forensic' ? 'Forensic reports and case documents for identity marker extraction.'
+                                : role === 'judge' ? 'Review documents with AI identity verification scoring.'
+                                  : 'Upload legal documents — criminal, civil, family, property, contract cases.')}</p>
                         </>
                       ) : (
-                        <div className="animate-in zoom-in duration-500">
-                          <div className="w-24 h-24 bg-blue-600 rounded-3xl flex items-center justify-center mb-8 shadow-2xl shadow-blue-600/40 ring-1 ring-blue-400">
-                            <FileCheck className="w-10 h-10 text-white" />
-                          </div>
+                        <div className="animate-in zoom-in duration-500 flex flex-col items-center">
+                          {previewUrl ? (
+                            <div className="relative group/preview mb-6">
+                              <img
+                                src={previewUrl}
+                                alt="Evidence Preview"
+                                className="w-48 h-48 object-cover rounded-3xl border-4 border-blue-600/50 shadow-2xl shadow-blue-600/20 group-hover:scale-105 transition-transform duration-500"
+                              />
+                              <button
+                                onClick={(e) => { e.stopPropagation(); setShowFullPreview(true); }}
+                                className="absolute inset-0 bg-slate-900/60 opacity-0 group-hover/preview:opacity-100 transition-opacity rounded-3xl flex items-center justify-center text-white font-black text-xs uppercase tracking-widest"
+                              >
+                                <Eye className="w-6 h-6 mr-2" /> Quick View
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="w-24 h-24 bg-blue-600 rounded-3xl flex items-center justify-center mb-8 shadow-2xl shadow-blue-600/40 ring-1 ring-blue-400">
+                              <FileCheck className="w-10 h-10 text-white" />
+                            </div>
+                          )}
                           <h3 className="text-2xl font-black mb-2">{file.name}</h3>
-                          <p className="text-blue-400 font-mono text-xs uppercase tracking-widest font-bold">SHA-Candidate Ready</p>
+                          <p className="text-blue-400 font-mono text-[10px] uppercase tracking-[0.3em] font-bold">Cryptographically Pre-Buffered</p>
                         </div>
                       )}
                     </div>
 
                     {file && !analysis && (
-                      <div className="mt-10 flex justify-center">
+                      <div className="mt-10 flex justify-center gap-4">
                         <button
                           onClick={(e) => {
                             console.log("Button DOM Clicked");
@@ -327,6 +627,13 @@ function App() {
                           {isAnalyzing ? <Activity className="animate-spin mr-3" /> : <Navigation className="mr-3" />}
                           {isAnalyzing ? "Processing AI Clusters..." : "Launch Forensic Pipeline"}
                         </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); resetUpload(); }}
+                          className="px-6 py-4 bg-slate-800 hover:bg-red-900/30 border border-white/10 hover:border-red-500/30 text-slate-400 hover:text-red-400 rounded-2xl font-black text-xs uppercase tracking-widest transition-all flex items-center"
+                          style={{ zIndex: 100, position: 'relative' }}
+                        >
+                          <ArrowRight className="mr-2 w-4 h-4 rotate-180" /> Reset
+                        </button>
                       </div>
                     )}
                   </div>
@@ -334,42 +641,156 @@ function App() {
                   {/* Step 2: Analysis Results Viewport */}
                   {analysis && !successMsg && (
                     <div className="animate-in slide-in-from-bottom-12 duration-700 space-y-10">
-                      {/* Trust Metrics Overlay */}
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-stretch">
-                        <div className="glass-card rounded-[2rem] p-8 border-white/5 flex flex-col items-center justify-center space-y-6">
-                          <TrustScore score={analysis.ai_analysis.tamper_score < 0.5 ? 98 : 34} />
-                          <div className="text-center">
-                            <div className="px-4 py-1.5 bg-slate-950 text-cyan-400 rounded-full text-[10px] font-black border border-cyan-500/20 uppercase tracking-widest inline-block mb-3">Forensic Grade Asset</div>
-                            <p className="text-slate-500 text-xs font-medium max-w-[180px]">Based on PRNU sensor noise and pixel consistency data.</p>
-                          </div>
-                        </div>
 
-                        <div className="glass-card rounded-[2rem] p-8 border-white/5 flex flex-col">
-                          <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-6 flex items-center">
-                            <Cpu className="w-3 h-3 mr-2 text-blue-500" /> AI Vision Output
-                          </h4>
-                          <div className="flex-1 flex flex-wrap gap-3 content-start">
-                            {analysis.ai_analysis.detected_objects.map((obj, i) => (
-                              <div key={i} className="px-5 py-2.5 bg-blue-600/10 border border-blue-500/30 rounded-xl text-xs font-black text-blue-300 uppercase tracking-widest flex items-center">
-                                <div className="w-1.5 h-1.5 bg-blue-400 rounded-full mr-3 shadow-[0_0_8px_rgba(96,165,250,0.8)]"></div>
-                                {obj}
+                      {/* ========== PHOTO EVIDENCE RESULTS ========== */}
+                      {analysis.evidence_type === 'photo' && analysis.ai_analysis && (
+                        <div className="space-y-8">
+                          {/* Scene Classification Header */}
+                          <div className="glass-card rounded-[2rem] p-8 border-white/5">
+                            <div className="flex items-center justify-between mb-6">
+                              <div>
+                                <div className="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-2">Scene Classification</div>
+                                <h3 className="text-2xl font-black text-white">{analysis.ai_analysis.scene_classification}</h3>
+                                {analysis.ai_analysis.case_type && analysis.ai_analysis.case_type !== 'Unknown' && (
+                                  <div className="mt-2 text-[9px] font-bold text-cyan-400 uppercase tracking-widest">Case Type: <span className="text-white">{analysis.ai_analysis.case_type}</span></div>
+                                )}
                               </div>
-                            ))}
-                            {analysis.ai_analysis.detected_objects.length === 0 && <span className="text-slate-600 italic text-sm">No critical objects identified.</span>}
-                          </div>
-                          <div className="mt-8 p-4 bg-slate-950/50 rounded-2xl border border-white/5 space-y-2">
-                            <div className="flex justify-between items-center text-[9px] font-bold uppercase tracking-widest">
-                              <span className="text-slate-500">Metadata Scan</span>
-                              <span className="text-blue-400">{analysis.ai_analysis.metadata_status}</span>
+                              <div className={`px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest border ${analysis.ai_analysis.severity === 'Critical' ? 'bg-red-500/10 text-red-400 border-red-500/30' :
+                                analysis.ai_analysis.severity === 'High' ? 'bg-orange-500/10 text-orange-400 border-orange-500/30' :
+                                  analysis.ai_analysis.severity === 'Moderate' ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/30' :
+                                    'bg-slate-500/10 text-slate-400 border-slate-500/30'
+                                }`}>{analysis.ai_analysis.severity} Severity</div>
                             </div>
-                            <div className="w-full h-1 bg-slate-800 rounded-full overflow-hidden">
-                              <div className="w-[100%] h-full bg-blue-500 animate-shimmer"></div>
-                            </div>
+                            {analysis.ai_analysis.image_quality && (
+                              <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Image Quality: <span className="text-blue-400">{analysis.ai_analysis.image_quality}</span></div>
+                            )}
                           </div>
-                        </div>
-                      </div>
 
-                      {/* Anchor Actions */}
+                          {/* Trust Score + Detected Elements */}
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                            <div className="glass-card rounded-[2rem] p-8 border-white/5 flex flex-col items-center justify-center space-y-4">
+                              <TrustScore score={Math.round(analysis.ai_analysis.trust_score * 100)} label={analysis.ai_analysis.trust_label} />
+                              <p className="text-slate-500 text-xs font-medium text-center max-w-[180px]">Based on forensic scene analysis and visual evidence detection.</p>
+                            </div>
+
+                            <div className="glass-card rounded-[2rem] p-8 border-white/5">
+                              <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-4 flex items-center">
+                                <AlertTriangle className="w-3 h-3 mr-2 text-red-400" /> Detected Forensic Elements
+                              </h4>
+                              <div className="space-y-3">
+                                {analysis.ai_analysis.detected_elements?.map((el, i) => (
+                                  <div key={i} className="flex items-center p-3 bg-red-500/5 border border-red-500/20 rounded-xl text-xs font-bold text-red-400 uppercase tracking-wider">
+                                    <div className="w-2 h-2 bg-red-500 rounded-full mr-3 shadow-[0_0_8px_rgba(239,68,68,0.8)]"></div>
+                                    {el}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+
+                            <div className="glass-card rounded-[2rem] p-8 border-white/5">
+                              <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-4 flex items-center">
+                                <Scale className="w-3 h-3 mr-2 text-blue-400" /> Applicable Laws & Sections
+                              </h4>
+                              <div className="space-y-2">
+                                {analysis.ai_analysis.applicable_sections?.map((sec, i) => (
+                                  <div key={i} className="px-4 py-2.5 bg-blue-500/5 border border-blue-500/20 rounded-xl text-[10px] font-bold text-blue-300 uppercase tracking-wider">
+                                    {sec}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Forensic Notes */}
+                          {analysis.ai_analysis.forensic_notes?.length > 0 && (
+                            <div className="glass-card rounded-[2rem] p-8 border-white/5">
+                              <h4 className="text-[10px] font-black text-emerald-400 uppercase tracking-widest mb-4 flex items-center">
+                                <Cpu className="w-3 h-3 mr-2" /> AI Forensic Analysis Notes
+                              </h4>
+                              <ul className="space-y-3">
+                                {analysis.ai_analysis.forensic_notes.map((note, i) => (
+                                  <li key={i} className="text-sm text-slate-400 flex items-start">
+                                    <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full mr-4 mt-1.5 shadow-[0_0_8px_rgba(16,185,129,0.8)]" />
+                                    {note}
+                                  </li>
+                                ))}
+                              </ul>
+                              {analysis.ai_analysis.color_analysis?.red_percentage > 0 && (
+                                <div className="mt-6 p-4 bg-slate-950/50 rounded-2xl border border-white/5">
+                                  <div className="flex justify-between text-[9px] font-bold uppercase tracking-widest mb-2">
+                                    <span className="text-slate-500">Blood / Red Saturation</span>
+                                    <span className="text-red-400">{analysis.ai_analysis.color_analysis.red_percentage}%</span>
+                                  </div>
+                                  <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+                                    <div className="h-full bg-gradient-to-r from-red-600 to-red-400 rounded-full transition-all duration-1000" style={{ width: `${Math.min(analysis.ai_analysis.color_analysis.red_percentage * 2, 100)}%` }}></div>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* ========== DOCUMENT EVIDENCE RESULTS ========== */}
+                      {analysis.evidence_type !== 'photo' && (
+                        <>
+                          {/* Trust Metrics Overlay */}
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 items-stretch">
+                            <div className="glass-card rounded-[2rem] p-8 border-white/5 flex flex-col items-center justify-center space-y-6">
+                              <TrustScore score={Math.round((1 - analysis.ai_analysis.tamper_score) * 100)} label={analysis.ai_analysis.trust_label} />
+                              <div className="text-center">
+                                <div className="px-4 py-1.5 bg-slate-950 text-cyan-400 rounded-full text-[10px] font-black border border-cyan-500/20 uppercase tracking-widest inline-block mb-3">Identity Verification</div>
+                                <p className="text-slate-500 text-xs font-medium max-w-[200px]">Based on identity markers extracted from the uploaded evidence document.</p>
+                              </div>
+                            </div>
+
+                            {/* Identity Marker Breakdown */}
+                            <div className="glass-card rounded-[2rem] p-8 border-white/5 flex flex-col">
+                              <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-4 flex items-center">
+                                <BioIcon className="w-3 h-3 mr-2 text-blue-500" /> Identity Markers ({analysis.ai_analysis.identity_verification?.markers_found || 0}/{analysis.ai_analysis.identity_verification?.markers_total || 10})
+                              </h4>
+                              <div className="flex-1 space-y-2 overflow-y-auto max-h-[280px]">
+                                {analysis.ai_analysis.identity_verification?.markers && Object.entries(analysis.ai_analysis.identity_verification.markers).map(([key, marker]) => (
+                                  <div key={key} className={`flex items-center justify-between p-2.5 rounded-xl border text-[10px] font-bold uppercase tracking-wider transition-all ${marker.found ? 'bg-green-500/5 border-green-500/20 text-green-400' : 'bg-slate-950/50 border-white/5 text-slate-600'}`}>
+                                    <span className="flex items-center">
+                                      <span className="mr-2">{marker.found ? '✓' : '✗'}</span>
+                                      {marker.label}
+                                    </span>
+                                    {marker.found && <span className="text-[9px] text-slate-500 normal-case tracking-normal max-w-[120px] truncate">{marker.value}</span>}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+
+                            <div className="glass-card rounded-[2rem] p-8 border-white/5 flex flex-col">
+                              <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-6 flex items-center">
+                                <Cpu className="w-3 h-3 mr-2 text-blue-500" /> AI Vision Output
+                              </h4>
+                              <div className="flex-1 flex flex-wrap gap-3 content-start">
+                                {analysis.ai_analysis.detected_objects.map((obj, i) => (
+                                  <div key={i} className="px-5 py-2.5 bg-blue-600/10 border border-blue-500/30 rounded-xl text-xs font-black text-blue-300 uppercase tracking-widest flex items-center">
+                                    <div className="w-1.5 h-1.5 bg-blue-400 rounded-full mr-3 shadow-[0_0_8px_rgba(96,165,250,0.8)]"></div>
+                                    {obj}
+                                  </div>
+                                ))}
+                                {analysis.ai_analysis.detected_objects.length === 0 && <span className="text-slate-600 italic text-sm">No critical objects identified.</span>}
+                              </div>
+                              <div className="mt-8 p-4 bg-slate-950/50 rounded-2xl border border-white/5 space-y-2">
+                                <div className="flex justify-between items-center text-[9px] font-bold uppercase tracking-widest">
+                                  <span className="text-slate-500">Metadata Scan</span>
+                                  <span className="text-blue-400">{analysis.ai_analysis.metadata_status}</span>
+                                </div>
+                                <div className="w-full h-1 bg-slate-800 rounded-full overflow-hidden">
+                                  <div className="w-[100%] h-full bg-blue-500 animate-shimmer"></div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </>
+                      )}
+
+
+                      {/* Anchor Actions — shared by photo and document */}
                       <div className="glass-card rounded-[2rem] p-10 border-white/5 flex items-center justify-between shadow-[0_0_40px_-5px_rgba(59,130,246,0.1)]">
                         <div className="flex items-center space-x-8">
                           <div className={`w-16 h-16 rounded-2xl flex items-center justify-center border transition-all duration-700 ${isSigned ? 'bg-green-600 border-green-400 animate-bounce' : 'bg-slate-950 border-white/10 animate-pulse'}`}>
@@ -554,7 +975,7 @@ function App() {
                             </div>
                             <h2 className="text-6xl font-black text-white tracking-tighter">INVALID</h2>
                             <p className="text-red-500 font-black uppercase tracking-[0.4em] text-xs">Security Protocol Violation</p>
-                            <div className="mt-6 p-8 bg-red-950/20 border border-red-500/20 rounded-[2rem] text-red-100 text-sm leading-relaxed font-medium">
+                            <div className="mt-8 p-8 bg-red-950/20 border border-red-500/20 rounded-[2rem] text-red-100 text-sm leading-relaxed font-medium">
                               The presented asset has NO matching record on the R3 Corda network.
                               Admitting this file into evidence would violate cryptographic chain-of-custody rules.
                             </div>
@@ -568,6 +989,100 @@ function App() {
                   )}
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* Developer System Health Dashboard */}
+          {activeTab === 'system' && perms.can_system_health && (
+            <div className="space-y-12 animate-in fade-in slide-in-from-bottom-8 duration-700">
+              <header className="flex items-center justify-between">
+                <div className="space-y-2">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-3 h-3 bg-cyan-500 animate-pulse rounded-full shadow-[0_0_15px_rgba(6,182,212,0.8)]"></div>
+                    <span className="text-xs font-black text-cyan-500 uppercase tracking-[0.2em]">System Maintenance Mode</span>
+                  </div>
+                  <h1 className="text-5xl font-black text-white tracking-tighter">Infra <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-300">Health</span></h1>
+                </div>
+                <button onClick={fetchSystemHealth} className="p-4 bg-slate-900 rounded-2xl border border-white/5 hover:border-cyan-500/30 transition-all text-cyan-400">
+                  <Activity className="w-6 h-6" />
+                </button>
+              </header>
+
+              {systemHealth ? (
+                <div className="space-y-8">
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div className="glass-card rounded-2xl p-6 border-cyan-500/10 text-center">
+                      <Cpu className="w-6 h-6 text-cyan-400 mx-auto mb-3" />
+                      <div className="text-2xl font-black text-white">{systemHealth.system.cpu_percent}%</div>
+                      <div className="text-[9px] font-black text-slate-600 uppercase tracking-widest">CPU Load</div>
+                    </div>
+                    <div className="glass-card rounded-2xl p-6 border-cyan-500/10 text-center">
+                      <HardDrive className="w-6 h-6 text-purple-400 mx-auto mb-3" />
+                      <div className="text-2xl font-black text-white">{systemHealth.system.memory_percent}%</div>
+                      <div className="text-[9px] font-black text-slate-600 uppercase tracking-widest">RAM Used</div>
+                    </div>
+                    <div className="glass-card rounded-2xl p-6 border-cyan-500/10 text-center">
+                      <Database className="w-6 h-6 text-blue-400 mx-auto mb-3" />
+                      <div className="text-2xl font-black text-white">{systemHealth.system.disk_percent}%</div>
+                      <div className="text-[9px] font-black text-slate-600 uppercase tracking-widest">Disk Used</div>
+                    </div>
+                    <div className="glass-card rounded-2xl p-6 border-cyan-500/10 text-center">
+                      <Users className="w-6 h-6 text-emerald-400 mx-auto mb-3" />
+                      <div className="text-2xl font-black text-white">{systemHealth.active_sessions}</div>
+                      <div className="text-[9px] font-black text-slate-600 uppercase tracking-widest">Sessions</div>
+                    </div>
+                  </div>
+
+                  <div className="glass-card rounded-3xl p-8 border-cyan-500/10">
+                    <h4 className="text-[10px] font-black text-cyan-400 uppercase tracking-widest mb-6 flex items-center">
+                      <Wifi className="w-3 h-3 mr-2" /> Service Status Matrix
+                    </h4>
+                    <div className="grid grid-cols-2 gap-4">
+                      {Object.entries(systemHealth.services).map(([svc, status]) => (
+                        <div key={svc} className="flex items-center justify-between p-4 bg-slate-950/60 rounded-xl border border-white/5">
+                          <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">{svc.replace(/_/g, ' ')}</span>
+                          <span className={`text-[9px] font-black uppercase tracking-widest px-3 py-1 rounded-lg border ${status === 'online' || status === 'active' ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' :
+                            status === 'standby' ? 'text-amber-400 bg-amber-500/10 border-amber-500/20' :
+                              'text-slate-500 bg-slate-800 border-slate-700'
+                            }`}>{status}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="glass-card rounded-3xl p-8 border-cyan-500/10">
+                    <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-6 flex items-center">
+                      <Terminal className="w-3 h-3 mr-2 text-cyan-400" /> Resource Allocation
+                    </h4>
+                    <div className="grid grid-cols-3 gap-6">
+                      <div className="bg-slate-950/60 p-5 rounded-xl border border-white/5">
+                        <div className="text-[9px] font-black text-slate-600 uppercase tracking-widest mb-2">Total RAM</div>
+                        <div className="text-lg font-black text-white">{systemHealth.system.memory_total_gb} GB</div>
+                      </div>
+                      <div className="bg-slate-950/60 p-5 rounded-xl border border-white/5">
+                        <div className="text-[9px] font-black text-slate-600 uppercase tracking-widest mb-2">RAM Used</div>
+                        <div className="text-lg font-black text-white">{systemHealth.system.memory_used_gb} GB</div>
+                      </div>
+                      <div className="bg-slate-950/60 p-5 rounded-xl border border-white/5">
+                        <div className="text-[9px] font-black text-slate-600 uppercase tracking-widest mb-2">Disk Total</div>
+                        <div className="text-lg font-black text-white">{systemHealth.system.disk_total_gb} GB</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="p-6 bg-slate-950/50 rounded-2xl border border-white/5">
+                    <p className="text-[10px] text-slate-600 font-bold uppercase tracking-widest">
+                      ⚠ Developer role has ZERO access to evidence or case data. System metrics only.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="glass-card rounded-3xl p-16 text-center border-dashed border-white/5 flex flex-col items-center justify-center">
+                  <Wrench className="w-16 h-16 text-slate-800 mb-8 animate-pulse" />
+                  <h3 className="text-2xl font-black text-slate-600 mb-4 uppercase tracking-tighter">Loading Diagnostics</h3>
+                  <p className="text-sm text-slate-500 font-medium">Fetching real-time system telemetry...</p>
+                </div>
+              )}
             </div>
           )}
 
@@ -707,8 +1222,48 @@ function App() {
             </div>
           </div>
         )}
-      </main>
-    </div>
+        {/* Full Screen Preview Modal */}
+        {showFullPreview && (
+          <div className="fixed inset-0 z-[2000] flex items-center justify-center p-8 bg-slate-950/90 backdrop-blur-xl animate-in fade-in duration-300">
+            <div
+              className="absolute inset-0"
+              onClick={() => setShowFullPreview(false)}
+            ></div>
+            <div className="relative glass-card rounded-[3rem] p-4 border-white/10 max-w-5xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+              <div className="flex items-center justify-between p-6 border-b border-white/5">
+                <div className="flex items-center space-x-4">
+                  <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-600/20">
+                    <Eye className="w-5 h-5 text-white" />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-black text-white">{file?.name}</h3>
+                    <p className="text-[10px] font-bold text-blue-400 uppercase tracking-widest">Evidence Pre-Ingestion Analysis</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowFullPreview(false)}
+                  className="w-12 h-12 bg-slate-900 rounded-2xl flex items-center justify-center border border-white/10 hover:bg-slate-800 transition-colors"
+                >
+                  <ArrowRight className="w-5 h-5 text-slate-400 rotate-180" />
+                </button>
+              </div>
+              <div className="flex-1 overflow-auto p-8 flex items-center justify-center bg-slate-950/50 rounded-[2rem] m-2">
+                <img
+                  src={previewUrl}
+                  alt="Full Preview"
+                  className="max-w-full max-h-full object-contain rounded-xl shadow-2xl"
+                />
+              </div>
+              <div className="p-6 text-center">
+                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                  Chain-of-Custody Integrity Protected // Local Preview Only
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+      </main >
+    </div >
   );
 }
 
