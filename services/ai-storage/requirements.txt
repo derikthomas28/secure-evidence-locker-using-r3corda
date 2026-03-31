@@ -6,4 +6,7 @@ scikit-learn
 psutil
 pytesseract
 Pillow
+Flask-SQLAlchemy
+psycopg2-binary
+gunicorn
 Werkzeug

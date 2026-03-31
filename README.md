@@ -12,6 +12,8 @@ Secure Evidence Locker is a high-security, blockchain-integrated platform design
 - **Role-Based Access (RBAC)**: Secure separation between Officers, Analysts, Judges, and Citizens.
 - **Infrastructure Dashboard**: Real-time telemetry (CPU/RAM/Logs) for system maintainers.
 - **Judicial Assistant**: LLM-aided case summaries and legal cross-referencing.
+- **SQL-Persistence**: Integrated SQLAlchemy for industrial-grade user management.
+- **Containerized**: Production-ready Docker & Docker Compose orchestration.
 
 ---
 
@@ -29,10 +31,14 @@ Secure Evidence Locker is a high-security, blockchain-integrated platform design
    ```bash
    .\start.bat
    ```
-3. **Roles**: Login with `password: secure2026` for any of the following accounts:
-   - `dev_support` (Developer)
-   - `honorable_justice` (Judge)
-   - `officer_vault` (Police/Forensic)
+   - `officer_vault`  (Police/Forensic)
+
+### 🐋 Production Startup (Docker)
+For a professional, containerized environment:
+```bash
+docker-compose up --build
+```
+This launches the UI on port 80 and the AI Cluster on port 5000.
 
 ---
 

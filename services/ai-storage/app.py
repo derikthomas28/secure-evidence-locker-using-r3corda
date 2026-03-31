@@ -9,9 +9,37 @@ import secrets
 import psutil
 import random
 
+from flask_sqlalchemy import SQLAlchemy
+import json
+
 app = Flask(__name__)
+# Secure database configuration (PostgreSQL for production / SQLite for local)
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///vault.db')
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+db = SQLAlchemy(app)
+
 # Explicitly allow the custom X-Auth-Token header and all origins
 CORS(app, resources={r"/*": {"origins": "*"}}, allow_headers=["Content-Type", "Authorization", "X-Auth-Token"])
+
+# ============================================================
+# PRODUCTION MODELS
+# ============================================================
+class User(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), unique=True, nullable=False)
+    password_hash = db.Column(db.String(120), nullable=False)
+    role = db.Column(db.String(20), nullable=False)
+    display_name = db.Column(db.String(100))
+    badge = db.Column(db.String(50))
+    clearance = db.Column(db.String(100))
+    permissions_json = db.Column(db.Text)  # Stores JSON string of permissions
+
+    def get_permissions(self):
+        return json.loads(self.permissions_json) if self.permissions_json else {}
+
+# Create DB tables inside the app context
+with app.app_context():
+    db.create_all()
 
 UPLOAD_FOLDER = 'uploads'
 if not os.path.exists(UPLOAD_FOLDER):
@@ -155,7 +183,29 @@ DEMO_USERS = {
     }
 }
 
-# In-memory session store (demo only)
+# Create DB tables and bootstrap with demo users
+def bootstrap_db():
+    with app.app_context():
+        db.create_all()
+        if not User.query.first():
+            print("⚓ Bootstrapping database with demo accounts...")
+            for uname, udata in DEMO_USERS.items():
+                new_user = User(
+                    username=uname,
+                    password_hash=udata['password_hash'],
+                    role=udata['role'],
+                    display_name=udata['display_name'],
+                    badge=udata['badge'],
+                    clearance=udata['clearance'],
+                    permissions_json=json.dumps(udata['permissions'])
+                )
+                db.session.add(new_user)
+            db.session.commit()
+            print("✅ Database ready.")
+
+bootstrap_db()
+
+# In-memory session store (demo only - real world would use Redis/Signed JWTs)
 ACTIVE_SESSIONS = {}
 
 def require_role(*allowed_roles):
@@ -187,19 +237,36 @@ def login():
     if not username or not password:
         return jsonify({"error": "Username and password are required."}), 400
 
-    user = DEMO_USERS.get(username)
-    if not user or user['password_hash'] != hash_pw(password):
-        return jsonify({"error": "Invalid credentials. Access denied."}), 401
+    # 1. Try modern SQL Database User first
+    user_db = User.query.filter_by(username=username).first()
+    
+    if user_db and user_db.password_hash == hash_pw(password):
+        user_role = user_db.role
+        display_name = user_db.display_name
+        badge = user_db.badge
+        clearance = user_db.clearance
+        permissions = user_db.get_permissions()
+    # 2. Fallback to static DEMO_USERS for legacy support
+    elif username in DEMO_USERS and DEMO_USERS[username]['password_hash'] == hash_pw(password):
+        u = DEMO_USERS[username]
+        user_role = u['role']
+        display_name = u['display_name']
+        badge = u['badge']
+        clearance = u['clearance']
+        permissions = u['permissions']
+    else:
+        return jsonify({"error": "Invalid credentials. Identity verification failure."}), 401
 
     token = secrets.token_hex(32)
     session_data = {
         "username": username,
-        "role": user['role'],
-        "display_name": user['display_name'],
-        "badge": user['badge'],
-        "clearance": user['clearance'],
-        "permissions": user['permissions'],
-        "login_time": int(time.time())
+        "role": user_role,
+        "display_name": display_name,
+        "badge": badge,
+        "clearance": clearance,
+        "permissions": permissions,
+        "login_time": int(time.time()),
+        "auth_engine": "SQL-Vault" if user_db else "Legacy-Static"
     }
     ACTIVE_SESSIONS[token] = session_data
 

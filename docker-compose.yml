@@ -1,0 +1,40 @@
+# Secure Evidence Locker - Unified Deployment
+version: '3.8'
+
+services:
+  # Python AI Backend (Storage & Analysis)
+  ai-backend:
+    build:
+      context: ./services/ai-storage
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./services/ai-storage/uploads:/app/uploads
+    environment:
+      - FLASK_ENV=production
+    restart: always
+
+  # React Frontend Dashboard
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - ai-backend
+    restart: always
+
+  # [Future Step] PostgreSQL Database
+  # db:
+  #   image: postgres:15-alpine
+  #   environment:
+  #     - POSTGRES_USER=evidencelocker
+  #     - POSTGRES_PASSWORD=secure2026
+  #     - POSTGRES_DB=vault
+  #   ports:
+  #     - "5432:5432"
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+
+# volumes:
+#   postgres_data:
