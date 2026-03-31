@@ -11,6 +11,7 @@ import CitizenNavigator from './CitizenNavigator';
 import CaseIntelligence from './CaseIntelligence';
 import CaseFiling from './CaseFiling';
 import LoginScreen from './LoginScreen';
+import SystemHealth from './SystemHealth';
 
 const API_AI_URL = "http://127.0.0.1:5000";
 const API_BLOCKCHAIN_URL = "http://127.0.0.1:10050";
@@ -94,7 +95,6 @@ function App() {
   const [showFullPreview, setShowFullPreview] = useState(false);
   const [ocrFile, setOcrFile] = useState(null);
   const [isScanning, setIsScanning] = useState(false);
-  const [systemHealth, setSystemHealth] = useState(null);
 
   // Auth helper: create axios instance with token
   const authHeaders = () => authToken ? { 'X-Auth-Token': authToken } : {};
@@ -122,7 +122,7 @@ function App() {
     setAnalysis(null);
     setOcrResult(null);
     setVerifyResult(null);
-    setSystemHealth(null);
+    setVerifyResult(null);
   };
 
   useEffect(() => {
@@ -232,16 +232,6 @@ function App() {
     }
   };
 
-  const fetchSystemHealth = async () => {
-    try {
-      const res = await axios.get(`${API_AI_URL}/api/system/health`, {
-        headers: authHeaders()
-      });
-      setSystemHealth(res.data);
-    } catch (err) {
-      console.error("Health fetch failed", err);
-    }
-  };
 
   const signEvidence = () => {
     setSigningStep(true);
@@ -1019,96 +1009,7 @@ function App() {
 
           {/* Developer System Health Dashboard */}
           {activeTab === 'system' && perms.can_system_health && (
-            <div className="space-y-12 animate-in fade-in slide-in-from-bottom-8 duration-700">
-              <header className="flex items-center justify-between">
-                <div className="space-y-2">
-                  <div className="flex items-center space-x-3">
-                    <div className="w-3 h-3 bg-cyan-500 animate-pulse rounded-full shadow-[0_0_15px_rgba(6,182,212,0.8)]"></div>
-                    <span className="text-xs font-black text-cyan-500 uppercase tracking-[0.2em]">System Maintenance Mode</span>
-                  </div>
-                  <h1 className="text-5xl font-black text-white tracking-tighter">Infra <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-300">Health</span></h1>
-                </div>
-                <button onClick={fetchSystemHealth} className="p-4 bg-slate-900 rounded-2xl border border-white/5 hover:border-cyan-500/30 transition-all text-cyan-400">
-                  <Activity className="w-6 h-6" />
-                </button>
-              </header>
-
-              {systemHealth ? (
-                <div className="space-y-8">
-                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                    <div className="glass-card rounded-2xl p-6 border-cyan-500/10 text-center">
-                      <Cpu className="w-6 h-6 text-cyan-400 mx-auto mb-3" />
-                      <div className="text-2xl font-black text-white">{systemHealth.system.cpu_percent}%</div>
-                      <div className="text-[9px] font-black text-slate-600 uppercase tracking-widest">CPU Load</div>
-                    </div>
-                    <div className="glass-card rounded-2xl p-6 border-cyan-500/10 text-center">
-                      <HardDrive className="w-6 h-6 text-purple-400 mx-auto mb-3" />
-                      <div className="text-2xl font-black text-white">{systemHealth.system.memory_percent}%</div>
-                      <div className="text-[9px] font-black text-slate-600 uppercase tracking-widest">RAM Used</div>
-                    </div>
-                    <div className="glass-card rounded-2xl p-6 border-cyan-500/10 text-center">
-                      <Database className="w-6 h-6 text-blue-400 mx-auto mb-3" />
-                      <div className="text-2xl font-black text-white">{systemHealth.system.disk_percent}%</div>
-                      <div className="text-[9px] font-black text-slate-600 uppercase tracking-widest">Disk Used</div>
-                    </div>
-                    <div className="glass-card rounded-2xl p-6 border-cyan-500/10 text-center">
-                      <Users className="w-6 h-6 text-emerald-400 mx-auto mb-3" />
-                      <div className="text-2xl font-black text-white">{systemHealth.active_sessions}</div>
-                      <div className="text-[9px] font-black text-slate-600 uppercase tracking-widest">Sessions</div>
-                    </div>
-                  </div>
-
-                  <div className="glass-card rounded-3xl p-8 border-cyan-500/10">
-                    <h4 className="text-[10px] font-black text-cyan-400 uppercase tracking-widest mb-6 flex items-center">
-                      <Wifi className="w-3 h-3 mr-2" /> Service Status Matrix
-                    </h4>
-                    <div className="grid grid-cols-2 gap-4">
-                      {Object.entries(systemHealth.services).map(([svc, status]) => (
-                        <div key={svc} className="flex items-center justify-between p-4 bg-slate-950/60 rounded-xl border border-white/5">
-                          <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">{svc.replace(/_/g, ' ')}</span>
-                          <span className={`text-[9px] font-black uppercase tracking-widest px-3 py-1 rounded-lg border ${status === 'online' || status === 'active' ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' :
-                            status === 'standby' ? 'text-amber-400 bg-amber-500/10 border-amber-500/20' :
-                              'text-slate-500 bg-slate-800 border-slate-700'
-                            }`}>{status}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="glass-card rounded-3xl p-8 border-cyan-500/10">
-                    <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-6 flex items-center">
-                      <Terminal className="w-3 h-3 mr-2 text-cyan-400" /> Resource Allocation
-                    </h4>
-                    <div className="grid grid-cols-3 gap-6">
-                      <div className="bg-slate-950/60 p-5 rounded-xl border border-white/5">
-                        <div className="text-[9px] font-black text-slate-600 uppercase tracking-widest mb-2">Total RAM</div>
-                        <div className="text-lg font-black text-white">{systemHealth.system.memory_total_gb} GB</div>
-                      </div>
-                      <div className="bg-slate-950/60 p-5 rounded-xl border border-white/5">
-                        <div className="text-[9px] font-black text-slate-600 uppercase tracking-widest mb-2">RAM Used</div>
-                        <div className="text-lg font-black text-white">{systemHealth.system.memory_used_gb} GB</div>
-                      </div>
-                      <div className="bg-slate-950/60 p-5 rounded-xl border border-white/5">
-                        <div className="text-[9px] font-black text-slate-600 uppercase tracking-widest mb-2">Disk Total</div>
-                        <div className="text-lg font-black text-white">{systemHealth.system.disk_total_gb} GB</div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="p-6 bg-slate-950/50 rounded-2xl border border-white/5">
-                    <p className="text-[10px] text-slate-600 font-bold uppercase tracking-widest">
-                      ⚠ Developer role has ZERO access to evidence or case data. System metrics only.
-                    </p>
-                  </div>
-                </div>
-              ) : (
-                <div className="glass-card rounded-3xl p-16 text-center border-dashed border-white/5 flex flex-col items-center justify-center">
-                  <Wrench className="w-16 h-16 text-slate-800 mb-8 animate-pulse" />
-                  <h3 className="text-2xl font-black text-slate-600 mb-4 uppercase tracking-tighter">Loading Diagnostics</h3>
-                  <p className="text-sm text-slate-500 font-medium">Fetching real-time system telemetry...</p>
-                </div>
-              )}
-            </div>
+            <SystemHealth authHeaders={authHeaders} API_AI_URL={API_AI_URL} />
           )}
 
           {activeTab === 'list' && (

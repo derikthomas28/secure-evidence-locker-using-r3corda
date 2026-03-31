@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 flask
 flask_cors
 opencv-python
@@ -7,10 +6,4 @@ scikit-learn
 psutil
 pytesseract
 Pillow
-=======
-flask
-flask_cors
-opencv-python
-exifread
-scikit-learn
->>>>>>> d2165740c73ef4c6d4a2639a12e4eddbb03146c0
+Werkzeug
