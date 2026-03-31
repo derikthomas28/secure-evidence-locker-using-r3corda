@@ -108,7 +108,7 @@ export default function SystemHealth({ authHeaders, API_AI_URL }) {
           </div>
         </div>
 
-        {/* Right: Service Status Matrix */}
+        {/* Right: Service Status Matrix & Controls */}
         <div className="lg:col-span-4 space-y-8">
           <div className="glass-card rounded-[2rem] p-8 border-cyan-500/10 h-full">
             <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-8 flex items-center">
@@ -132,26 +132,84 @@ export default function SystemHealth({ authHeaders, API_AI_URL }) {
               ))}
             </div>
 
-            <div className="mt-12 p-6 bg-cyan-600/5 border border-cyan-500/10 rounded-2xl">
+            <div className="mt-12 p-6 bg-slate-900/40 border border-white/5 rounded-2xl">
               <div className="flex items-center space-x-3 mb-6">
-                <Activity className="w-4 h-4 text-cyan-400" />
-                <span className="text-[10px] font-black text-cyan-400 uppercase tracking-widest">Network Analytics</span>
+                <Terminal className="w-4 h-4 text-cyan-400" />
+                <span className="text-[10px] font-black text-cyan-400 uppercase tracking-widest">Maintenance Controls</span>
               </div>
-              <div className="space-y-6">
-                <AnalyticsRow label="Avg Latency" value={`${health.stats?.avg_latency_ms || 0}ms`} percent={15} color="bg-cyan-500" />
-                <AnalyticsRow label="Throughput" value={`${health.stats?.api_calls_processed || 0} req/min`} percent={65} color="bg-blue-500" />
+              <div className="grid grid-cols-1 gap-3">
+                <MaintenanceButton 
+                  label="Sanitize Orphan Files" 
+                  action="clear_temp" 
+                  icon={HardDrive}
+                  API_AI_URL={API_AI_URL}
+                  authHeaders={authHeaders}
+                />
+                <MaintenanceButton 
+                  label="Verify DB Integrity" 
+                  action="db_verify" 
+                  icon={Database}
+                  API_AI_URL={API_AI_URL}
+                  authHeaders={authHeaders}
+                />
+                <MaintenanceButton 
+                  label="Rotate Session Keys" 
+                  action="rotate_keys" 
+                  icon={RefreshCw}
+                  API_AI_URL={API_AI_URL}
+                  authHeaders={authHeaders}
+                />
               </div>
             </div>
-            
-            <div className="mt-12 p-6 bg-slate-950/40 rounded-2xl border border-white/5">
+
+            <div className="mt-8 p-6 bg-slate-950/40 rounded-2xl border border-white/5">
               <p className="text-[9px] text-slate-600 font-bold uppercase tracking-widest leading-loose">
-                ⚠ Root access active. Developer role has zero access to private case data or evidence contents.
+                ⚠ Root access active. Developer role restricted to metadata & environment telemetry. Access to judicial vault content is perm-blocked.
               </p>
             </div>
           </div>
         </div>
       </div>
     </div>
+  );
+}
+
+function MaintenanceButton({ icon: Icon, label, action, API_AI_URL, authHeaders }) {
+  const [loading, setLoading] = useState(false);
+  const [msg, setMsg] = useState('');
+
+  const handleAction = async () => {
+    setLoading(true);
+    setMsg('EXECUTING...');
+    try {
+      const res = await axios.post(`${API_AI_URL}/api/system/maintenance`, 
+        { action },
+        { headers: authHeaders() }
+      );
+      setMsg(res.data.status === 'success' ? 'SUCCESS' : 'FAILED');
+      setTimeout(() => setMsg(''), 3000);
+    } catch (err) {
+      setMsg('ERROR');
+      setTimeout(() => setMsg(''), 3000);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <button 
+      onClick={handleAction}
+      disabled={loading}
+      className="flex items-center justify-between p-4 bg-slate-900 border border-white/5 rounded-xl hover:border-cyan-500/50 hover:bg-cyan-500/5 transition-all text-left group"
+    >
+      <div className="flex items-center space-x-3">
+        <Icon className={`w-4 h-4 ${loading ? 'animate-spin text-cyan-400' : 'text-slate-500 group-hover:text-cyan-400'}`} />
+        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{label}</span>
+      </div>
+      <span className={`text-[8px] font-bold font-mono ${msg === 'SUCCESS' ? 'text-emerald-500' : msg === 'ERROR' ? 'text-red-500' : 'text-slate-700'}`}>
+        {msg || 'RUN'}
+      </span>
+    </button>
   );
 }
 

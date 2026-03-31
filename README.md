@@ -1,6 +1,8 @@
 # ⚖️ SECURE EVIDENCE LOCKER (using R3 Corda)
 **Next-Generation Forensic Legal-Tech Ecosystem** 
 
+> **Vision Statement**: [Read our Mission for India's Digital Justice here](./VISION.md)
+
 ---
 
 ## 🚀 Overview
