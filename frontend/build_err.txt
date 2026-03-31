@@ -1,0 +1,22 @@
+[31m✗[39m Build failed in 471ms
+[31merror during build:
+[31m[vite:esbuild] Transform failed with 1 error:
+C:/Users/91974/Downloads/final-year-project/secure-evidence-locker-using-r3corda/frontend/src/CitizenNavigator.jsx:185:0: ERROR: Unexpected end of file before a closing "div" tag[31m
+file: [36mC:/Users/91974/Downloads/final-year-project/secure-evidence-locker-using-r3corda/frontend/src/CitizenNavigator.jsx:185:0[31m
+[33m
+[33mUnexpected end of file before a closing "div" tag[33m
+183 |  
+184 |                          <div className="glass-card rounded-3xl p-8 border-emerald-500/10">
+185 |  
+    |  ^
+[31m
+    at failureErrorWithLog (C:\Users\91974\Downloads\final-year-project\secure-evidence-locker-using-r3corda\frontend\node_modules\esbuild\lib\main.js:1467:15)
+    at C:\Users\91974\Downloads\final-year-project\secure-evidence-locker-using-r3corda\frontend\node_modules\esbuild\lib\main.js:736:50
+    at responseCallbacks.<computed> (C:\Users\91974\Downloads\final-year-project\secure-evidence-locker-using-r3corda\frontend\node_modules\esbuild\lib\main.js:603:9)
+    at handleIncomingPacket (C:\Users\91974\Downloads\final-year-project\secure-evidence-locker-using-r3corda\frontend\node_modules\esbuild\lib\main.js:658:12)
+    at Socket.readFromStdout (C:\Users\91974\Downloads\final-year-project\secure-evidence-locker-using-r3corda\frontend\node_modules\esbuild\lib\main.js:581:7)
+    at Socket.emit (node:events:518:28)
+    at addChunk (node:internal/streams/readable:561:12)
+    at readableAddChunkPushByteMode (node:internal/streams/readable:512:3)
+    at Readable.push (node:internal/streams/readable:392:5)
+    at Pipe.onStreamRead (node:internal/stream_base_commons:189:23)[39m
