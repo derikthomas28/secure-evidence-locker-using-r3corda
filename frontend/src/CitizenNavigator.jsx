@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import axios from 'axios';
 import {
     MessageCircle, Send, Activity, Shield, AlertTriangle, CheckCircle,
-    Scale, BookOpen, Users, ArrowRight, Info, ChevronDown, ChevronUp, Terminal
+    Scale, BookOpen, Users, ArrowRight, Info, ChevronDown, ChevronUp, Terminal,
+    Zap, Cpu
 } from 'lucide-react';
 
 const API_AI_URL = "http://127.0.0.1:5000";
@@ -68,42 +69,55 @@ export default function CitizenNavigator({ authHeaders, handleLogout }) {
                 </div>
             </header>
 
-            {/* Search Bar */}
-            <div className="glass-card rounded-3xl p-10 border-blue-500/10 relative group overflow-hidden">
-                <div className="absolute top-0 left-0 w-1 h-full bg-blue-500 opacity-20 group-hover:opacity-100 transition-opacity"></div>
+            {/* Search Bar - Premium Deep AI Interface */}
+            <div className="glass-card rounded-[3.5rem] p-12 border-blue-500/10 relative group overflow-hidden bg-slate-900/40 backdrop-blur-3xl shadow-[0_50px_100px_-20px_rgba(37,99,235,0.1)]">
+                <div className="absolute top-0 left-0 w-full h-[3px] bg-gradient-to-r from-transparent via-blue-500 to-transparent opacity-0 group-hover:opacity-80 transition-opacity animate-shimmer bg-[length:200%_100%]"></div>
+                <div className="absolute -inset-24 bg-blue-600/5 blur-[100px] rounded-full pointer-events-none group-hover:bg-blue-600/10 transition-colors"></div>
 
-                <h2 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-6 flex items-center">
-                    <MessageCircle className="w-4 h-4 mr-3 text-blue-500" /> Neural Situational Analysis
-                </h2>
+                <div className="flex items-center justify-between mb-10">
+                    <h2 className="text-[11px] font-black text-slate-500 uppercase tracking-[0.4em] flex items-center">
+                        <Terminal className="w-4 h-4 mr-4 text-blue-500" /> Neural Context Engine v2.4
+                    </h2>
+                    <div className="flex items-center space-x-4">
+                        <div className="flex items-center space-x-2 px-4 py-1.5 bg-emerald-500/10 border border-emerald-500/20 rounded-full">
+                            <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
+                            <span className="text-[9px] font-black text-emerald-500 uppercase tracking-widest">BNS Core: Online</span>
+                        </div>
+                    </div>
+                </div>
 
-                <div className="flex space-x-4">
+                <div className="relative">
                     <textarea
                         value={query}
                         onChange={(e) => setQuery(e.target.value)}
                         onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitQuery(); } }}
-                        placeholder="Describe the incident in plain language (e.g., Someone snatched my jewelry near the red fort)..."
-                        className="flex-1 bg-slate-950/80 border border-blue-500/10 rounded-2xl p-6 text-sm text-blue-300 font-medium resize-none focus:outline-none focus:border-blue-500/40 placeholder-slate-700 h-24"
+                        placeholder="Describe your situation in natural language (e.g., 'My bike was stolen from the parking lot last night')..."
+                        className="w-full bg-slate-950/90 border border-white/5 rounded-[2.5rem] p-10 pb-32 text-xl text-blue-50 text-center font-medium resize-none focus:outline-none focus:border-blue-500/30 placeholder-slate-800 h-64 shadow-2xl transition-all hover:bg-slate-950"
                     />
-                    <button onClick={() => submitQuery()} disabled={isSearching || !query.trim()}
-                        className="px-10 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-black text-xs uppercase tracking-widest transition-all disabled:opacity-50 flex items-center shadow-lg">
-                        {isSearching ? <Activity className="animate-spin" /> : <><Send className="w-4 h-4 mr-2" /> DISPATCH</>}
-                    </button>
+                    
+                    <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex items-center space-x-6">
+                        <button onClick={() => submitQuery()} disabled={isSearching || !query.trim()}
+                            className="group/btn relative overflow-hidden px-20 py-7 bg-blue-600 hover:bg-blue-500 text-white rounded-[2rem] font-black text-xs uppercase tracking-[0.3em] transition-all disabled:opacity-30 disabled:grayscale shadow-[0_20px_60px_rgba(37,99,235,0.4)] hover:shadow-[0_25px_70px_rgba(59,130,246,0.6)] active:scale-95 flex items-center">
+                            <div className="absolute inset-0 bg-gradient-to-r from-white/20 to-transparent -translate-x-[100%] group-hover/btn:translate-x-[100%] transition-transform duration-1000"></div>
+                            {isSearching ? <Activity className="animate-spin w-5 h-5" /> : <><Send className="w-4 h-4 mr-4 group-hover/btn:rotate-12 transition-transform" /> Analyze Incident</>}
+                        </button>
+                    </div>
                 </div>
 
-                {/* Example Queries */}
-                <div className="mt-8 flex flex-wrap gap-2">
-                    <span className="text-[9px] font-black text-slate-600 uppercase tracking-widest mr-2 self-center">Presets:</span>
+                {/* Example Queries - Premium Chips */}
+                <div className="mt-14 flex flex-wrap gap-3 justify-center">
                     {exampleQueries.map((eq, i) => (
                         <button key={i} onClick={() => handleExampleClick(eq)}
-                            className="px-4 py-2 bg-slate-950/60 border border-white/5 rounded-lg text-[9px] text-slate-500 hover:text-blue-400 hover:border-blue-500/30 transition-all font-black uppercase tracking-wider">
+                            className="px-6 py-3.5 bg-slate-950/80 border border-white/5 rounded-2xl text-[9px] text-slate-500 hover:text-blue-300 hover:bg-blue-500/10 hover:border-blue-500/40 transition-all font-black uppercase tracking-widest flex items-center group">
+                            <Zap className="w-3 h-3 mr-3 opacity-20 group-hover:opacity-100 text-amber-500 transition-opacity" />
                             {eq}
                         </button>
                     ))}
                 </div>
 
                 {error && (
-                    <div className="mt-6 p-4 bg-red-950/30 border border-red-500/30 rounded-xl text-red-400 text-[10px] font-black uppercase tracking-widest flex items-center">
-                        <AlertTriangle className="w-4 h-4 mr-3 flex-shrink-0" /> {error}
+                    <div className="mt-10 p-6 bg-red-950/40 border border-red-500/30 rounded-3xl text-red-400 text-[10px] font-black uppercase tracking-[0.2em] flex items-center justify-center animate-in shake h-20 shadow-3xl">
+                        <AlertTriangle className="w-5 h-5 mr-5 animate-pulse" /> {error}
                     </div>
                 )}
             </div>
@@ -167,35 +181,37 @@ export default function CitizenNavigator({ authHeaders, handleLogout }) {
 
                     {/* Defenses & Rights */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                        <div className="glass-card rounded-3xl p-8 border-blue-500/10">
-                            <h4 className="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-6 flex items-center">
-                                <Shield className="w-3 h-3 mr-2 text-blue-500" /> Defense Vector Analysis
-                            </h4>
-                            <ul className="space-y-4">
-                                {result?.available_defenses?.map((def, i) => (
-                                     <li key={i} className="flex items-start text-sm text-slate-300">
-                                         <div className="w-1.5 h-1.5 bg-blue-500 rounded-full mr-4 mt-1.5 shadow-[0_0_8px_rgba(59,130,246,0.8)]" />
-                                         {def}
-                                     </li>
-                                 ))}
-                            </ul>
-                        </div>
+                        {result.available_defenses?.length > 0 && (
+                            <div className="glass-card rounded-3xl p-8 border-blue-500/10">
+                                <h4 className="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-6 flex items-center">
+                                    <Shield className="w-3 h-3 mr-2 text-blue-500" /> Defense Vector Analysis
+                                </h4>
+                                <ul className="space-y-4">
+                                    {result.available_defenses.map((def, i) => (
+                                        <li key={i} className="flex items-start text-sm text-slate-300">
+                                            <div className="w-1.5 h-1.5 bg-blue-500 rounded-full mr-4 mt-1.5 shadow-[0_0_8px_rgba(59,130,246,0.8)]" />
+                                            {def}
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                        )}
 
-                        <div className="glass-card rounded-3xl p-8 border-emerald-500/10">
-                            <h4 className="text-[10px] font-black text-emerald-400 uppercase tracking-widest mb-6 flex items-center">
-                                <BookOpen className="w-3 h-3 mr-2 text-emerald-500" /> Procedural Guidelines
-                            </h4>
-                            <ul className="space-y-4">
-                                {(result?.procedures || []).map((proc, i) => (
-                                    <li key={i} className="flex items-start text-sm text-slate-300">
-                                        <div className="w-6 h-6 bg-emerald-500/10 border border-emerald-500/20 rounded-lg flex items-center justify-center mr-4 mt-0.5 flex-shrink-0">
-                                            <span className="text-[9px] font-black text-emerald-400">{i + 1}</span>
-                                        </div>
-                                        {proc}
-                                    </li>
-                                ))}
-                            </ul>
-                        </div>
+                        {result.procedural_guidelines?.length > 0 && (
+                            <div className="glass-card rounded-3xl p-8 border-emerald-500/10">
+                                <h4 className="text-[10px] font-black text-emerald-400 uppercase tracking-widest mb-6 flex items-center">
+                                    <BookOpen className="w-3 h-3 mr-2 text-emerald-500" /> Procedural Guidelines
+                                </h4>
+                                <ul className="space-y-4">
+                                    {result.procedural_guidelines.map((proc, i) => (
+                                        <li key={i} className="flex items-start text-sm text-slate-300">
+                                            <div className="w-5 h-5 bg-emerald-500/10 border border-emerald-500/20 rounded flex items-center justify-center mr-4 mt-0.5 text-[8px] font-black text-emerald-500">{i+1}</div>
+                                            {proc}
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                        )}
                     </div>
 
                     {/* Citizen Rights Accordion */}

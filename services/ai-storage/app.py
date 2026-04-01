@@ -49,43 +49,79 @@ if not os.path.exists(UPLOAD_FOLDER):
 # CASE MANAGEMENT STORE (In-memory, demo)
 # ============================================================
 # Stores FIRs and linked evidence by case number
-CASE_STORE = {}
-
-# Seed with a demo case for immediate use
-CASE_STORE["CR-2026-001"] = {
-    "case_number": "CR-2026-001",
-    "title": "Armed Robbery at Ryme City Mall",
-    "incident_type": "robbery",
-    "description": "Accused forcibly snatched cash and jewelry from complainant at knifepoint inside Ryme City Mall, Gate 3. Two witnesses present. Accused fled on a motorcycle.",
-    "location": "Ryme City Mall, Gate 3, Sector 14",
-    "incident_date": "2026-03-15",
-    "complainant": "Rajesh Kumar Sharma",
-    "accused": "Unknown (Male, 5'8\", black helmet)",
-    "investigating_officer": "Officer Arjun Mehta (OFC-4821)",
-    "fir_number": "FIR/2026/RC/0421",
-    "status": "Under Investigation",
-    "created_at": int(time.time()) - 86400,
-    "created_by": "officer_vault",
-    "evidence_list": [
-        {
-            "evidence_id": "EV-001",
-            "type": "photo",
-            "description": "CCTV grab of accused at Gate 3",
-            "submitted_by": "officer_vault",
-            "submitted_at": int(time.time()) - 82000,
-            "sha256": "a1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef123456",
-            "forensic_result": {"scene_classification": "Weapon Recovery Scene", "severity": "Critical", "detected_elements": ["Weapon / Dangerous Object"], "applicable_sections": ["BNS 309 (Robbery)", "BNS 115 (Hurt)", "BNS 303 (Theft)"]}
-        },
-        {
-            "evidence_id": "EV-002",
-            "type": "document",
-            "description": "Witness statement by Mr. P. Verma",
-            "submitted_by": "forensic_lab",
-            "submitted_at": int(time.time()) - 76000,
-            "sha256": "b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef1234567",
-            "forensic_result": {"trust_label": "Good", "metadata_status": "Valid", "identity_verification": {"identity_score_pct": 72}}
-        }
-    ]
+CASE_STORE = {
+    "CR-2026-001": {
+        "case_number": "CR-2026-001",
+        "title": "State vs. Unknown (Mall Robbery)",
+        "incident_type": "Robbery",
+        "description": "Armed robbery at mall gate. Suspect used a knife to snatch cash. Two witnesses present.",
+        "location": "Ryme City Mall, Gate 3, Sector 14",
+        "incident_date": "2026-03-15",
+        "complainant": "Rajesh Sharma",
+        "accused": "Unknown (Male, 5'8\")",
+        "investigating_officer": "Officer Arjun Mehta (OFC-4821)",
+        "fir_number": "FIR/2026/RC/0421",
+        "status": "Investigation Underway",
+        "created_at": int(time.time()) - 86400,
+        "created_by": "officer_vault",
+        "evidence_list": [
+            {
+                "evidence_id": "EV-001",
+                "type": "photo",
+                "description": "CCTV grab of accused at Gate 3",
+                "submitted_by": "officer_vault",
+                "submitted_at": int(time.time()) - 82000,
+                "sha256": "sh8291...331",
+                "forensic_result": {"scene_classification": "Weapon Recovery Scene", "severity": "Critical", "detected_elements": ["Weapon / Dangerous Object"], "applicable_sections": ["BNS 309 (Robbery)", "BNS 115 (Hurt)"]}
+            }
+        ]
+    },
+    "CR-2026-002": {
+        "case_number": "CR-2026-002",
+        "title": "Cyber Fraud (Phishing)",
+        "incident_type": "Cheating",
+        "description": "Complainant duped of 50,000 INR through a deceptive website link for job offer.",
+        "location": "Online / Cyber Cell",
+        "incident_date": "2026-03-20",
+        "complainant": "Sneha Roy",
+        "accused": "Unknown Domain (Phish-Job-Portal.tk)",
+        "investigating_officer": "Officer Arjun Mehta (OFC-4821)",
+        "fir_number": "FIR/2026/CYB/1102",
+        "status": "FIR Registered",
+        "created_at": int(time.time()) - 3600 * 24,
+        "created_by": "officer_vault",
+        "evidence_list": [
+            {
+                "evidence_id": "EV-002",
+                "type": "document",
+                "description": "Deceptive Email Screenshot",
+                "submitted_by": "officer_vault",
+                "submitted_at": int(time.time()) - 3600,
+                "sha256": "df0921...882",
+                "forensic_result": {"trust_label": "Valid", "metadata_status": "Integrity Check Pass", "applicable_sections": ["BNS 318 (Cheating)", "IT Act 66D"]}
+            }
+        ]
+    },
+    "CR-2026-003": {
+        "case_number": "CR-2026-003",
+        "title": "Domestic Conflict (Assault)",
+        "incident_type": "Assault",
+        "description": "Physical altercation resulting in minor injuries. Evidence includes medical report.",
+        "location": "Residency Park, Apartment 4B",
+        "incident_date": "2026-03-25",
+        "complainant": "Vikas Gupta",
+        "accused": "Rohit Verma",
+        "investigating_officer": "Officer Arjun Mehta (OFC-4821)",
+        "fir_number": "FIR/2026/RC/0551",
+        "status": "Under Investigation",
+        "created_at": int(time.time()) - 3600 * 12,
+        "created_by": "officer_vault",
+        "case_diary": [
+            {"date": "2026-03-25", "time": "10:00", "location": "Apartment 4B", "findings": "Initial response. Complainant was visibly distressed. Collected medical first-aid kit.", "officer": "Arjun Mehta"}
+        ],
+        "final_judgment": None,
+        "evidence_list": []
+    }
 }
 
 # ============================================================
@@ -110,7 +146,7 @@ DEMO_USERS = {
             "can_judicial_ai": False,
             "can_system_health": False,
             "can_verify": False,
-            "can_navigate": False,
+            "can_navigate": True,
         }
     },
     "forensic_lab": {
@@ -120,13 +156,15 @@ DEMO_USERS = {
         "badge": "FSL-0092",
         "clearance": "Level 4 — Forensic Sciences",
         "permissions": {
+            "can_measure": True,
+            "can_detail": True,
             "can_upload": True,
             "can_ocr": True,
             "can_view_evidence": True,
-            "can_view_all": False,
+            "can_view_all": True,
             "can_judicial_ai": False,
             "can_system_health": False,
-            "can_verify": False,
+            "can_verify": True,
             "can_navigate": False,
         }
     },
@@ -144,7 +182,7 @@ DEMO_USERS = {
             "can_judicial_ai": True,
             "can_system_health": False,
             "can_verify": True,
-            "can_navigate": False,
+            "can_navigate": True,
         }
     },
     "citizen_view": {
@@ -208,11 +246,26 @@ bootstrap_db()
 # In-memory session store (demo only - real world would use Redis/Signed JWTs)
 ACTIVE_SESSIONS = {}
 
+# In-memory stores for Feedback and System Events (Non-judicial metadata)
+FEEDBACK_STORE = [
+    {"id": "FB-001", "role": "judge", "user": "Banerjee", "text": "The summaries are excellent, can we add multi-case comparison?", "timestamp": int(time.time()) - 172800},
+    {"id": "FB-002", "role": "citizen", "user": "Sneha", "text": "Very helpful for understanding FIR procedures.", "timestamp": int(time.time()) - 86400}
+]
+
+SYSTEM_EVENTS = [
+    {"id": "TH-001", "level": "Warning", "type": "Traffic", "message": "Increased latency in IPFS gateway pinned nodes.", "timestamp": int(time.time()) - 10000},
+    {"id": "TH-002", "level": "Info", "type": "Sync", "message": "Daily blockchain state-sync with Corda node 04 complete.", "timestamp": int(time.time()) - 5000}
+]
+
 def require_role(*allowed_roles):
     """Decorator to restrict endpoint access by role."""
     def decorator(f):
         @wraps(f)
         def decorated(*args, **kwargs):
+            # Optional check if role is 'anonymous'
+            if 'anonymous' in allowed_roles:
+                return f(*args, **kwargs)
+                
             token = request.headers.get('X-Auth-Token', '')
             if not token or token not in ACTIVE_SESSIONS:
                 return jsonify({"error": "Authentication required. Please login."}), 401
@@ -396,10 +449,14 @@ def analyze_evidence():
 
             return jsonify({
                 "filename": file.filename,
+                "evidence_id": f"EV-{secrets.token_hex(4).upper()}",
                 "evidence_type": evidence_type,
                 "ai_analysis": ai_report,
                 "ipfs_hash": ipfs_hash,
                 "sha256": file_hash,
+                "measurements": request.form.get('measurements'),
+                "physical_objects": request.form.get('physical_objects'),
+                "branch_of": request.form.get('branch_of'), # Linked to a previous evidence_id if correction
                 "timestamp": int(time.time()),
                 "submitted_by": request.current_user['username']
             })
@@ -487,7 +544,7 @@ def judicial_summarize():
 # ============================================================
 
 @app.route('/api/citizen/navigate', methods=['POST'])
-@require_role('public', 'judge')
+@require_role('public', 'judge', 'officer', 'forensic', 'developer')
 def citizen_navigate():
     if not request.is_json:
         return jsonify({"error": "Request must be JSON with a 'query' field."}), 400
@@ -565,7 +622,8 @@ def create_case():
         "status": "FIR Registered",
         "created_at": int(time.time()),
         "created_by": request.current_user['username'],
-        "evidence_list": []
+        "evidence_list": [],
+        "case_diary": []
     }
     CASE_STORE[case_number] = case
     print(f"[CASE] Created {case_number} by {request.current_user['username']}")
@@ -623,7 +681,10 @@ def attach_case_evidence(case_number):
             "submitted_at": int(time.time()),
             "sha256": sha256,
             "ipfs_hash": ipfs_hash,
-            "forensic_result": forensic_result
+            "forensic_result": forensic_result,
+            "measurements": request.form.get('measurements'),
+            "physical_objects": request.form.get('physical_objects'),
+            "branch_of": request.form.get('branch_of')
         }
         case['evidence_list'].append(evidence_item)
         case['status'] = 'Under Investigation'
@@ -749,6 +810,58 @@ def judicial_case_analysis(case_number):
     return jsonify(report)
 
 
+# ============================================================
+# SYSTEM MONITORING: FEEDBACK & EVENTS (Developer Only)
+# ============================================================
+
+@app.route('/api/feedback', methods=['POST'])
+@require_role('officer', 'judge', 'citizen', 'developer', 'anonymous')
+def submit_feedback():
+    data = request.get_json()
+    if not data or 'text' not in data:
+        return jsonify({"error": "Feedback text required."}), 400
+    
+    # Handle anonymous or logged in
+    user_role = 'anonymous'
+    username = 'Public User'
+    if hasattr(request, 'current_user'):
+        user_role = request.current_user['role']
+        username = request.current_user['username']
+
+    fb = {
+        "id": f"FB-{str(len(FEEDBACK_STORE) + 1).zfill(3)}",
+        "role": user_role,
+        "user": username,
+        "text": data['text'],
+        "timestamp": int(time.time())
+    }
+    FEEDBACK_STORE.append(fb)
+    return jsonify({"status": "success", "message": "Feedback submitted to developers.", "feedback": fb})
+
+@app.route('/api/system/feedback', methods=['GET'])
+@require_role('developer')
+def get_feedbacks():
+    return jsonify(FEEDBACK_STORE)
+
+@app.route('/api/system/events', methods=['GET'])
+@require_role('developer')
+def get_system_events():
+    return jsonify(SYSTEM_EVENTS)
+
+@app.route('/api/system/simulate_threat', methods=['POST'])
+@require_role('developer')
+def simulate_threat():
+    threat = {
+        "id": f"TH-{str(len(SYSTEM_EVENTS) + 1).zfill(3)}",
+        "level": "Critical",
+        "type": "Integrity",
+        "message": f"Simulated unauthorized access attempt detected from IP {request.remote_addr}",
+        "timestamp": int(time.time())
+    }
+    SYSTEM_EVENTS.insert(0, threat)
+    return jsonify({"status": "threat_simulated", "event": threat})
+
+
 @app.route('/api/system/maintenance', methods=['POST'])
 @require_role('developer')
 def system_maintenance():
@@ -756,6 +869,7 @@ def system_maintenance():
     Developer Maintenance Interface.
     Allows low-level system hygiene without data access.
     """
+    global SYSTEM_EVENTS, FEEDBACK_STORE
     data = request.get_json()
     action = data.get('action')
     
@@ -798,7 +912,63 @@ def system_maintenance():
             "timestamp": int(time.time())
         })
     
+    elif action == 'mitigate_threats':
+        # Simulated mitigation
+        count = len([e for e in SYSTEM_EVENTS if e['level'] == 'Critical'])
+        # Clear critical threats in demo
+        SYSTEM_EVENTS = [e for e in SYSTEM_EVENTS if e['level'] != 'Critical']
+        return jsonify({
+            "status": "success", 
+            "message": f"Mitigation sequence complete. Neutralized {count} critical integrity alerts.",
+            "timestamp": int(time.time())
+        })
+    
     return jsonify({"error": "Invalid maintenance action specified."}), 400
+
+
+@app.route('/api/cases/<case_number>/diary', methods=['POST'])
+@require_role('officer')
+def add_diary_entry(case_number):
+    if case_number not in CASE_STORE:
+        return jsonify({"error": "Case not found"}), 404
+    
+    data = request.get_json()
+    entry = {
+        "date": data.get('date'),
+        "time": data.get('time'),
+        "location": data.get('location'),
+        "findings": data.get('findings', ''),
+        "officer": request.current_user['display_name'],
+        "timestamp": int(time.time())
+    }
+    
+    if 'case_diary' not in CASE_STORE[case_number]:
+        CASE_STORE[case_number]['case_diary'] = []
+    
+    CASE_STORE[case_number]['case_diary'].append(entry)
+    return jsonify({"status": "success", "entry": entry})
+
+
+@app.route('/api/cases/<case_number>/judgment', methods=['POST'])
+@require_role('judge')
+def submit_judgment(case_number):
+    if case_number not in CASE_STORE:
+        return jsonify({"error": "Case not found"}), 404
+    
+    data = request.get_json()
+    judgment_text = data.get('judgment')
+    
+    if not judgment_text:
+        return jsonify({"error": "Judgment text is required."}), 400
+        
+    CASE_STORE[case_number]['final_judgment'] = {
+        "text": judgment_text,
+        "judge": request.current_user['display_name'],
+        "timestamp": int(time.time())
+    }
+    CASE_STORE[case_number]['status'] = "Closed / Judgment Delivered"
+    
+    return jsonify({"status": "success", "message": "Final judgment recorded on ledger."})
 
 
 if __name__ == '__main__':

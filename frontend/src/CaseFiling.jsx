@@ -74,12 +74,9 @@ function CaseSearch({ cases, onSelect }) {
 
 // ── Step 2: Upload evidence for the selected case ────────────────────────────
 function EvidenceUpload({ caseDetail, authHeaders, handleLogout, onDone }) {
-    const [file, setFile] = useState(null);
-    const [desc, setDesc] = useState('');
-    const [evType, setEvType] = useState('document');
-    const [isSubmitting, setIsSubmitting] = useState(false);
-    const [error, setError] = useState('');
-    const [success, setSuccess] = useState('');
+    const [measurements, setMeasurements] = useState('');
+    const [physObjects, setPhysObjects] = useState('');
+    const [branchOf, setBranchOf] = useState(''); // ID of evidence being corrected
 
     const submit = async () => {
         setError(''); setSuccess('');
@@ -91,12 +88,16 @@ function EvidenceUpload({ caseDetail, authHeaders, handleLogout, onDone }) {
         fd.append('file', file);
         fd.append('description', desc);
         fd.append('evidence_type', evType);
+        fd.append('measurements', measurements);
+        fd.append('physical_objects', physObjects);
+        if (branchOf) fd.append('branch_of', branchOf);
+
         try {
             await axios.post(`${API_AI_URL}/api/cases/${caseDetail.case_number}/evidence`, fd, {
                 headers: { 'Content-Type': 'multipart/form-data', ...authHeaders() }
             });
             setSuccess(`Evidence attached to ${caseDetail.case_number} successfully!`);
-            setFile(null); setDesc('');
+            setFile(null); setDesc(''); setMeasurements(''); setPhysObjects(''); setBranchOf('');
             document.getElementById('evFileInput').value = '';
             setTimeout(onDone, 1500);
         } catch (err) {
@@ -146,10 +147,44 @@ function EvidenceUpload({ caseDetail, authHeaders, handleLogout, onDone }) {
 
             {/* Description */}
             <div>
-                <label className="block text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2">Description *</label>
-                <input value={desc} onChange={e => { setDesc(e.target.value); setError(''); }}
-                    placeholder="e.g., CCTV grab showing accused at Gate 3, Witness statement by Mr. Verma..."
+                <label className="block text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2">Detailed Description *</label>
+                <textarea value={desc} onChange={e => { setDesc(e.target.value); setError(''); }}
+                    placeholder="e.g., Blood spatter patterns on west wall, Recovered weapon specifications..."
+                    rows={3}
                     className="w-full bg-slate-900/80 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-700 focus:outline-none focus:border-purple-500/50" />
+            </div>
+
+            {/* Forensic Specs (if any) */}
+            <div className="grid grid-cols-2 gap-4">
+                <div>
+                    <label className="block text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2">Measurements (Forensic)</label>
+                    <input value={measurements} onChange={e => setMeasurements(e.target.value)}
+                        placeholder="e.g. 15cm x 4cm, 50ml"
+                        className="w-full bg-slate-900/80 border border-white/10 rounded-xl px-4 py-2 text-xs text-white placeholder-slate-700 focus:outline-none focus:border-purple-500/50" />
+                </div>
+                <div>
+                    <label className="block text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2">Physical Objects</label>
+                    <input value={physObjects} onChange={e => setPhysObjects(e.target.value)}
+                        placeholder="e.g. 2 casings, 1 blade"
+                        className="w-full bg-slate-900/80 border border-white/10 rounded-xl px-4 py-2 text-xs text-white placeholder-slate-700 focus:outline-none focus:border-purple-500/50" />
+                </div>
+            </div>
+
+            {/* Branching Logic (Immutable Correction) */}
+            <div>
+                <label className="block text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2">Correction Branch (Optional)</label>
+                <select value={branchOf} onChange={e => setBranchOf(e.target.value)}
+                    className="w-full bg-slate-900/80 border border-white/10 rounded-xl px-4 py-3 text-[10px] text-white focus:outline-none focus:border-amber-500/50">
+                    <option value="">New Evidence Asset (Main Branch)</option>
+                    {caseDetail.evidence_list?.map(ev => (
+                        <option key={ev.evidence_id} value={ev.evidence_id}>
+                            Correcting: {ev.evidence_id} ({ev.description.substring(0, 30)}...)
+                        </option>
+                    ))}
+                </select>
+                <p className="text-[10px] text-amber-500 font-bold mt-1 uppercase italic tracking-tighter">
+                    Using this will create a corrective branch in the ledger. The original mistake will remain in history.
+                </p>
             </div>
 
             {/* Feedback */}
@@ -174,6 +209,78 @@ function EvidenceUpload({ caseDetail, authHeaders, handleLogout, onDone }) {
                 <Lock className="w-3 h-3" />
                 <span>Evidence is immutable once attached. No deletion or modification permitted.</span>
             </p>
+        </div>
+    );
+}
+
+// ── Investigation Diary ──────────────────────────────────────────────────────
+function InvestigationDiary({ caseDetail, authHeaders, handleLogout, onRefresh }) {
+    const [entry, setEntry] = useState({ date: new Date().toISOString().split('T')[0], time: '', location: '', findings: '' });
+    const [isSubmitting, setIsSubmitting] = useState(false);
+
+    const submit = async () => {
+        if (!entry.findings.trim()) return;
+        setIsSubmitting(true);
+        try {
+            await axios.post(`${API_AI_URL}/api/cases/${caseDetail.case_number}/diary`, entry, { headers: authHeaders() });
+            setEntry({ date: new Date().toISOString().split('T')[0], time: '', location: '', findings: '' });
+            onRefresh(caseDetail.case_number);
+        } catch (err) {
+            if (err.response?.status === 401) handleLogout();
+        } finally { setIsSubmitting(false); }
+    };
+
+    return (
+        <div className="space-y-6">
+            <div className="glass-card p-6 border-blue-500/20 rounded-2xl bg-blue-500/5">
+                <h3 className="text-xs font-black text-blue-400 uppercase tracking-widest mb-4 flex items-center">
+                    <Plus className="w-3 h-3 mr-2" /> New Diary Entry
+                </h3>
+                <div className="grid grid-cols-3 gap-4 mb-4">
+                    <input type="date" value={entry.date} onChange={e => setEntry({...entry, date: e.target.value})} className="bg-slate-900 border border-white/10 rounded-lg p-2 text-xs text-white" />
+                    <input type="time" value={entry.time} onChange={e => setEntry({...entry, time: e.target.value})} className="bg-slate-900 border border-white/10 rounded-lg p-2 text-xs text-white" />
+                    <input placeholder="Location" value={entry.location} onChange={e => setEntry({...entry, location: e.target.value})} className="bg-slate-900 border border-white/10 rounded-lg p-2 text-xs text-white" />
+                </div>
+                <textarea value={entry.findings} onChange={e => setEntry({...entry, findings: e.target.value})}
+                    placeholder="Describe findings, witness interviews, or scene observations..."
+                    className="w-full bg-slate-900 border border-white/10 rounded-xl p-3 text-xs text-white mb-4 h-24" />
+                <button onClick={submit} disabled={isSubmitting} className="w-full py-2.5 bg-blue-600 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-500 transition-all flex items-center justify-center gap-2">
+                    {isSubmitting ? <Activity className="animate-spin w-3 h-3" /> : <FileText className="w-3 h-3" />}
+                    Log Field Entry to Ledger
+                </button>
+            </div>
+
+            <div className="space-y-4">
+                <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Chronological Case Logs ({caseDetail.case_diary?.length || 0})</h3>
+                <div className="space-y-3">
+                    {caseDetail.case_diary?.slice().reverse().map((log, i) => (
+                        <div key={i} className="p-4 border border-white/5 bg-slate-900/40 rounded-xl relative overflow-hidden group">
+                           <div className="absolute left-0 top-0 bottom-0 w-1 bg-blue-500/30 group-hover:bg-blue-500 transition-colors" />
+                           <div className="flex justify-between items-start mb-2">
+                               <div className="flex items-center gap-2">
+                                   <Calendar className="w-3 h-3 text-blue-400" />
+                                   <span className="text-[10px] text-white font-bold tracking-tight">{log.date} · {log.time}</span>
+                               </div>
+                               <div className="flex items-center gap-1 opacity-50">
+                                   <MapPin className="w-3 h-3" />
+                                   <span className="text-[9px] uppercase font-black">{log.location}</span>
+                               </div>
+                           </div>
+                           <p className="text-xs text-slate-300 leading-relaxed font-medium">{log.findings}</p>
+                           <div className="mt-3 flex items-center gap-2 pt-2 border-t border-white/5">
+                               <div className="w-4 h-4 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center text-[8px] font-black">@</div>
+                               <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Recorded by {log.officer}</span>
+                           </div>
+                        </div>
+                    ))}
+                    {(!caseDetail.case_diary || caseDetail.case_diary.length === 0) && (
+                        <div className="text-center py-10 opacity-30">
+                            <Activity className="w-8 h-8 mx-auto mb-2" />
+                            <p className="text-[10px] font-black uppercase">No logs registered yet</p>
+                        </div>
+                    )}
+                </div>
+            </div>
         </div>
     );
 }
@@ -275,7 +382,7 @@ function FIRForm({ authHeaders, handleLogout, onCreated }) {
 
 // ── Main CaseFiling component ────────────────────────────────────────────────
 export default function CaseFiling({ authHeaders, handleLogout, role }) {
-    // view: 'list' | 'fir' | 'search' | 'upload'
+    // view: 'list' | 'fir' | 'search' | 'upload' | 'diary'
     const [view, setView] = useState('list');
     const [cases, setCases] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
@@ -293,11 +400,11 @@ export default function CaseFiling({ authHeaders, handleLogout, role }) {
         } finally { setIsLoading(false); }
     };
 
-    const handleCaseSelect = async (caseNum) => {
+    const handleCaseSelect = async (caseNum, targetView = 'upload') => {
         try {
             const res = await axios.get(`${API_AI_URL}/api/cases/${caseNum}`, { headers: authHeaders() });
             setSelectedCase(res.data);
-            setView('upload');
+            setView(targetView);
         } catch (err) {
             if (err.response?.status === 401) handleLogout();
         }
@@ -317,7 +424,7 @@ export default function CaseFiling({ authHeaders, handleLogout, role }) {
                 </p>
             </div>
             <div className="flex space-x-3">
-                {(view === 'search' || view === 'upload' || view === 'fir') && (
+                {(view === 'search' || view === 'upload' || view === 'fir' || view === 'diary') && (
                     <button onClick={goBack}
                         className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-black uppercase tracking-widest rounded-xl transition-all">
                         ← Back
@@ -362,10 +469,16 @@ export default function CaseFiling({ authHeaders, handleLogout, role }) {
                         <p className="text-sm font-bold text-white">{c.title}</p>
                         <p className="text-[9px] text-slate-500 uppercase font-bold mt-1">{c.fir_number} · {c.evidence_count} evidence item(s)</p>
                     </div>
-                    <button onClick={() => handleCaseSelect(c.case_number)}
-                        className="px-4 py-2 bg-purple-600/20 border border-purple-500/30 text-purple-400 text-[9px] font-black uppercase tracking-widest rounded-xl hover:bg-purple-600/40 transition-all flex items-center space-x-1.5">
-                        <Upload className="w-3 h-3" /><span>Attach Evidence</span>
-                    </button>
+                    <div className="flex items-center space-x-2">
+                        <button onClick={() => handleCaseSelect(c.case_number, 'diary')}
+                            className="px-4 py-2 bg-blue-600/20 border border-blue-500/30 text-blue-400 text-[9px] font-black uppercase tracking-widest rounded-xl hover:bg-blue-600/40 transition-all flex items-center space-x-1.5">
+                            <FileText className="w-3 h-3" /><span>Diary Logs</span>
+                        </button>
+                        <button onClick={() => handleCaseSelect(c.case_number, 'upload')}
+                            className="px-4 py-2 bg-purple-600/20 border border-purple-500/30 text-purple-400 text-[9px] font-black uppercase tracking-widest rounded-xl hover:bg-purple-600/40 transition-all flex items-center space-x-1.5">
+                            <Upload className="w-3 h-3" /><span>Attach Evidence</span>
+                        </button>
+                    </div>
                 </div>
             ))}
         </div>
@@ -394,7 +507,6 @@ export default function CaseFiling({ authHeaders, handleLogout, role }) {
                     <CaseSearch cases={cases} onSelect={handleCaseSelect} />
                 </div>
             )}
-
             {/* Step 2: Upload evidence */}
             {view === 'upload' && selectedCase && (
                 <div className="glass-card rounded-3xl p-8 border-purple-500/10">
@@ -406,6 +518,21 @@ export default function CaseFiling({ authHeaders, handleLogout, role }) {
                         authHeaders={authHeaders}
                         handleLogout={handleLogout}
                         onDone={goBack}
+                    />
+                </div>
+            )}
+
+            {/* Case Diary view */}
+            {view === 'diary' && selectedCase && (
+                <div className="glass-card rounded-3xl p-8 border-blue-500/10">
+                    <h2 className="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-6 flex items-center">
+                        <FileText className="w-4 h-4 mr-2" /> Investigation Diary — {selectedCase.case_number}
+                    </h2>
+                    <InvestigationDiary
+                        caseDetail={selectedCase}
+                        authHeaders={authHeaders}
+                        handleLogout={handleLogout}
+                        onRefresh={(caseNum) => handleCaseSelect(caseNum, 'diary')}
                     />
                 </div>
             )}

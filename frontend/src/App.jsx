@@ -95,6 +95,32 @@ function App() {
   const [showFullPreview, setShowFullPreview] = useState(false);
   const [ocrFile, setOcrFile] = useState(null);
   const [isScanning, setIsScanning] = useState(false);
+  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
+  const [feedbackText, setFeedbackText] = useState('');
+  const [isSendingFeedback, setIsSendingFeedback] = useState(false);
+
+  const handleFeedbackSubmit = async (e) => {
+    e.preventDefault();
+    if (!feedbackText.trim()) return;
+    
+    try {
+      const headers = { 'Content-Type': 'application/json' };
+      if (authToken) {
+        headers['X-Auth-Token'] = authToken;
+      }
+      
+      await axios.post(`${API_AI_URL}/api/feedback`, 
+        { text: feedbackText },
+        { headers }
+      );
+      setFeedbackText('');
+      setShowFeedbackModal(false);
+      alert("Feedback submitted to developers.");
+    } catch (err) {
+      console.error("Feedback error:", err);
+      alert("Failed to send feedback.");
+    }
+  };
 
   // Auth helper: create axios instance with token
   const authHeaders = () => authToken ? { 'X-Auth-Token': authToken } : {};
@@ -374,6 +400,14 @@ function App() {
                 <Gavel className={`w-5 h-5 ${activeTab === 'case_intel' ? 'text-amber-400' : 'text-slate-500'}`} />
                 <span>Case Intelligence</span>
               </button>
+              <button onClick={() => setActiveTab('diary')} className={`nav-btn ${activeTab === 'diary' && 'active'}`}>
+                <FileText className={`w-5 h-5 ${activeTab === 'diary' ? 'text-amber-400' : 'text-slate-500'}`} />
+                <span>Case Diary</span>
+              </button>
+              <button onClick={() => setActiveTab('judgment')} className={`nav-btn ${activeTab === 'judgment' && 'active'}`}>
+                <CheckCircle className={`w-5 h-5 ${activeTab === 'judgment' ? 'text-amber-400' : 'text-slate-500'}`} />
+                <span>Final Judgment</span>
+              </button>
               <button onClick={() => setActiveTab('list')} className={`nav-btn ${activeTab === 'list' && 'active'}`}>
                 <Activity className={`w-5 h-5 ${activeTab === 'list' ? 'text-amber-400' : 'text-slate-500'}`} />
                 <span>Master Docket</span>
@@ -426,6 +460,14 @@ function App() {
               <StatusIndicator label="OCR Cluster" status="Standby" color="text-amber-400" />
             </div>
           </div>
+
+          <button 
+            onClick={() => setShowFeedbackModal(true)}
+            className="w-full p-4 bg-purple-600/10 border border-purple-500/20 rounded-2xl hover:bg-purple-600 group transition-all flex items-center justify-between"
+          >
+            <span className="text-[10px] font-black text-purple-400 group-hover:text-white uppercase tracking-widest">Stakeholder Feedback</span>
+            <MessageCircle className="w-4 h-4 text-purple-500 group-hover:text-white group-hover:rotate-12 transition-transform" />
+          </button>
           <div className="text-[9px] font-black text-slate-700 uppercase tracking-[0.3em] text-center">
             OS // RYME-CITY-PD-V2.4
           </div>
@@ -1009,7 +1051,7 @@ function App() {
 
           {/* Developer System Health Dashboard */}
           {activeTab === 'system' && perms.can_system_health && (
-            <SystemHealth authHeaders={authHeaders} API_AI_URL={API_AI_URL} />
+            <SystemHealth authHeaders={authHeaders} API_AI_URL={API_AI_URL} handleLogout={handleLogout} />
           )}
 
           {activeTab === 'list' && (
@@ -1184,6 +1226,51 @@ function App() {
                 <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
                   Chain-of-Custody Integrity Protected // Local Preview Only
                 </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Stakeholder Feedback Modal */}
+        {showFeedbackModal && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-2xl animate-in zoom-in duration-300">
+            <div className="bg-slate-900 rounded-[3rem] w-full max-w-xl overflow-hidden border border-white/10 shadow-[0_0_80px_rgba(147,51,234,0.2)]">
+              <div className="p-10 border-b border-white/5 bg-gradient-to-br from-purple-500/10 to-transparent">
+                <div className="flex items-center space-x-4 mb-2">
+                  <div className="w-12 h-12 bg-purple-600 rounded-2xl flex items-center justify-center">
+                    <MessageCircle className="w-6 h-6 text-white" />
+                  </div>
+                  <div>
+                    <h3 className="text-2xl font-black text-white uppercase tracking-tighter">Command Center Feedback</h3>
+                    <p className="text-[10px] font-black text-purple-400 uppercase tracking-widest">Stakeholder Telemetry Link</p>
+                  </div>
+                </div>
+              </div>
+              <div className="p-10 space-y-6">
+                <div>
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3 block">Your Report / Concern</label>
+                  <textarea 
+                    value={feedbackText}
+                    onChange={(e) => setFeedbackText(e.target.value)}
+                    placeholder="Describe any malfunctions, errors, or feedback here... Our developers will see this immediately."
+                    className="w-full h-40 bg-slate-950/50 border border-white/10 rounded-3xl p-6 text-white placeholder-slate-600 focus:outline-none focus:border-purple-500/50 transition-all resize-none text-sm font-medium leading-relaxed"
+                  />
+                </div>
+                <div className="flex items-center space-x-4">
+                  <button 
+                    onClick={() => setShowFeedbackModal(false)}
+                    className="flex-1 py-5 rounded-2xl font-black text-xs uppercase tracking-widest text-slate-500 hover:bg-white/5 transition-all"
+                  >
+                    Discard
+                  </button>
+                  <button 
+                    onClick={handleFeedbackSubmit}
+                    disabled={isSendingFeedback}
+                    className="flex-[2] py-5 bg-purple-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg shadow-purple-600/30 hover:bg-purple-500 hover:-translate-y-1 transition-all active:scale-95 disabled:opacity-50 disabled:translate-y-0"
+                  >
+                    {isSendingFeedback ? 'Transmitting...' : 'Send to Developers'}
+                  </button>
+                </div>
               </div>
             </div>
           </div>

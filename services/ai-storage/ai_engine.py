@@ -870,10 +870,10 @@ def _build_nlp_index():
     
     _section_corpus = []
     for section in corpus_source:
-        # Boost title and chapter for better matching
-        title = section.get("title", "")
-        chapter = section.get("chapter", "")
-        desc = section.get("desc", "")
+        # Boost title and chapter for better matching - Ensure they are strings
+        title = str(section.get("title", "") or "Untitled Section")
+        chapter = str(section.get("chapter", "") or "General")
+        desc = str(section.get("desc", "") or "")
         
         # Titles are very important - repeat them to boost weight in TF-IDF
         boosted_title = (title + " ") * 5
@@ -886,15 +886,26 @@ def _build_nlp_index():
                 expansion_text += " " + value
         
         metadata = section.get("metadata", {})
+        
+        # Safely extract and cast all searchable fields
+        punishment = str(section.get("punishment") or "")
+        offense = str(metadata.get("offense") or "")
+        
+        # Safely handle list fields
+        defenses_list = section.get("defenses") or []
+        rights_list = section.get("rights") or []
+        defenses_str = " ".join([str(d) for d in defenses_list if d is not None])
+        rights_str = " ".join([str(r) for r in rights_list if r is not None])
+
         corpus_text = " ".join([
             boosted_title,
             expansion_text,
             chapter,
             desc,
-            section.get("punishment", ""),
-            metadata.get("offense", ""),
-            " ".join(section.get("defenses", [])),
-            " ".join(section.get("rights", []))
+            punishment,
+            offense,
+            defenses_str,
+            rights_str
         ]).lower()
         _section_corpus.append(_stem_text(corpus_text))
     
@@ -921,53 +932,57 @@ def navigate_legal_query(query):
     """
     from sklearn.metrics.pairwise import cosine_similarity
     
-    _ensure_nlp_index()
-    
-    # Vectorize the user query after stemming
+    # --- SITUATION ANALYSIS STAGE ---
+    # Convert query to stemmed vector
     stemmed_query = _stem_text(query)
+    
+    # Check for direct keyword matches first (super fast)
+    keyword_hit = _keyword_fallback(query)
+    
+    # Vectorize after ensuring index
+    _ensure_nlp_index()
     query_vec = _tfidf_vectorizer.transform([stemmed_query])
     
-    # Compute cosine similarity against all sections
+    # Compute cosine similarity
     similarities = cosine_similarity(query_vec, _tfidf_matrix).flatten()
-    
-    # Get indices sorted by similarity (descending)
     ranked_indices = similarities.argsort()[::-1]
     
-    # Filter to sections with meaningful similarity (> 0.01 threshold - lowered for larger dataset)
+    # Threshold filtering (Very low for high recall in SITUATIONS)
     matches = []
-    corpus_source = _DYNAMIC_LEGAL_SECTIONS if _DYNAMIC_LEGAL_SECTIONS else LEGAL_SECTIONS
     
+    # Manual thresholding
     for idx in ranked_indices:
         score = similarities[idx]
-        if score < 0.01:
+        if score < 0.005: # Very sensitive to catch laymen's words
             break
-        if len(matches) >= 5:
+        if len(matches) >= 6:
             break
-        section = corpus_source[idx]
         
-        # Boost BNS sections slightly in ranking
+        section = _DYNAMIC_LEGAL_SECTIONS[idx] if _DYNAMIC_LEGAL_SECTIONS else LEGAL_SECTIONS[idx]
+        
+        # Weighted Ranking: Boost BNS and Recent datasets
         final_score = float(score)
         if section.get("dataset") == "BNS":
-            final_score *= 1.2
+            final_score *= 1.3
             
         matches.append({
             "section": section,
             "score": final_score
         })
     
-    # Re-sort based on boosted scores
+    # Re-sort with boost
     matches.sort(key=lambda x: x["score"], reverse=True)
     
-    # If NLP didn't find matches, fall back to direct keyword search
-    if not matches:
-        matches = _keyword_fallback(query)
+    # Use keyword fallback if NLP is weak
+    if keyword_hit and (not matches or matches[0]['score'] < 0.1):
+        # Merge keyword results but prioritize if they are very strong
+        matches = keyword_hit + matches
     
     if not matches:
         return {
             "status": "no_match",
-            "message": "I could not find a specific legal section matching your description. Please try rephrasing with more details about the incident. For example: 'Someone stole my phone from my bag' or 'My neighbor threatened to kill me'.",
-            "fundamental_rights": FUNDAMENTAL_RIGHTS,
-            "suggestion": "If this is an emergency, please dial 112 (National Emergency Number) or visit your nearest police station."
+            "message": "I could not identify a specific BNS/IPC section for your situation. Please include more details (e.g., 'stole a car', 'beaten with a stick', 'cheated on WhatsApp').",
+            "suggestion": "Consult the Help menu for example queries."
         }
     
     primary = matches[0]["section"]
@@ -1007,7 +1022,7 @@ def navigate_legal_query(query):
         "related_sections": [],
         "fundamental_rights": FUNDAMENTAL_RIGHTS,
         "nlp_engine": "TF-IDF Cosine Similarity v2 (Dynamic Data)",
-        "total_laws_searched": len(corpus_source),
+        "total_laws_searched": len(_DYNAMIC_LEGAL_SECTIONS) if _DYNAMIC_LEGAL_SECTIONS else len(LEGAL_SECTIONS),
         "disclaimer": "This is AI-generated legal information for educational purposes only. It does NOT constitute legal advice. Please consult a qualified advocate for your specific case."
     }
     
