@@ -178,7 +178,7 @@ export default function CaseIntelligence({ authHeaders, handleLogout }) {
         c.fir_number?.toLowerCase().includes(searchTerm.toLowerCase())
     );
 
-    const statusColor = (s) => s === 'Closed' ? 'text-emerald-400 border-emerald-500/20 bg-emerald-500/10' : 'text-blue-400 border-blue-500/20 bg-blue-500/10';
+    const statusColor = (s) => s?.includes('Closed') ? 'text-emerald-400 border-emerald-500/20 bg-emerald-500/10' : 'text-blue-400 border-blue-500/20 bg-blue-500/10';
 
     return (
         <div className="flex h-full gap-6 animate-in fade-in slide-in-from-bottom-8 duration-700">
@@ -206,9 +206,9 @@ export default function CaseIntelligence({ authHeaders, handleLogout }) {
                             <div className="flex justify-between items-start">
                                 <div>
                                     <h2 className="text-3xl font-[1000] text-white tracking-tighter">{selectedCase.title}</h2>
-                                    <p className="text-blue-400 font-black text-xs uppercase mt-2">{selectedCase.case_number} · FIR {selectedCase.fir_number}</p>
+                                    <p className="text-blue-400 font-black text-[10px] uppercase mt-2 tracking-widest">{selectedCase.case_number} · FIR {selectedCase.fir_number}</p>
                                 </div>
-                                <div className={`px-4 py-1.5 rounded-xl border font-black text-xs uppercase ${statusColor(selectedCase.status)}`}>{selectedCase.status}</div>
+                                <div className={`px-4 py-1.5 rounded-xl border font-black text-[9px] uppercase tracking-widest ${statusColor(selectedCase.status)}`}>{selectedCase.status}</div>
                             </div>
                         </div>
 
@@ -237,24 +237,32 @@ export default function CaseIntelligence({ authHeaders, handleLogout }) {
                             </div>
                         </div>
 
-                        <div className="glass-card rounded-3xl p-8 border-amber-500/10">
-                            <h3 className="text-[10px] font-black text-amber-400 uppercase mb-6 flex items-center"><Scale className="w-3 h-3 mr-2" /> Applicable Legal Framework (BNS/IPC)</h3>
+                        <div className="glass-card rounded-3xl p-8 border-amber-500/10 bg-amber-500/5">
+                            <h3 className="text-[10px] font-black text-amber-400 uppercase mb-6 flex items-center tracking-widest"><Scale className="w-3 h-3 mr-2" /> Applicable Legal Framework (BNS/IPC)</h3>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                {caseReport.applicable_sections.map((s, i) => (
-                                    <div key={i} className="p-4 bg-slate-900 rounded-xl border border-white/5 flex items-start space-x-3">
-                                        <div className="p-2 bg-amber-500/10 rounded-lg text-amber-400 font-black text-[10px]">{s.split(':')[0]}</div>
-                                        <p className="text-xs text-slate-300 font-medium">{s.split(':').slice(1).join(':')}</p>
+                                {caseReport.applicable_laws?.map((law, i) => (
+                                    <div key={i} className="p-4 bg-slate-950/60 rounded-xl border border-white/5 flex items-start space-x-3 group hover:border-amber-500/30 transition-all">
+                                        <div className="p-2 bg-amber-500/10 rounded-lg text-amber-400 font-black text-[9px] tracking-tighter min-w-[60px] text-center">
+                                            {law.bns_section !== "—" ? `BNS ${law.bns_section}` : `IPC ${law.ipc_section}`}
+                                        </div>
+                                        <div>
+                                            <p className="text-xs text-white font-bold mb-1">{law.title}</p>
+                                            <p className="text-[10px] text-slate-500 font-medium leading-relaxed">{law.punishment}</p>
+                                        </div>
                                     </div>
                                 ))}
                             </div>
                         </div>
 
                         <div className="glass-card rounded-3xl p-8 border-emerald-500/10 bg-emerald-500/5">
-                            <h3 className="text-[10px] font-black text-emerald-400 uppercase mb-6 flex items-center"><Gavel className="w-4 h-4 mr-2" /> Final Judicial Verdict</h3>
-                            {selectedCase.status === 'Closed' ? (
+                            <h3 className="text-[10px] font-black text-emerald-400 uppercase mb-6 flex items-center tracking-widest"><Gavel className="w-4 h-4 mr-2" /> Final Judicial Verdict</h3>
+                            {selectedCase.status?.includes('Closed') ? (
                                 <div className="p-6 bg-slate-950/60 rounded-2xl border border-emerald-500/30">
-                                    <p className="text-[9px] font-black text-emerald-500 uppercase mb-2">Final Writ</p>
-                                    <p className="text-sm text-white font-serif leading-relaxed italic">"{selectedCase.final_judgment}"</p>
+                                    <div className="flex justify-between items-center mb-4">
+                                        <p className="text-[9px] font-black text-emerald-500 uppercase tracking-widest">Final Writ // Handed Down</p>
+                                        <span className="text-[8px] font-mono text-slate-600">SIGNED BY JUSTICE {selectedCase.final_judgment?.judge}</span>
+                                    </div>
+                                    <p className="text-sm text-white font-serif leading-relaxed italic">"{selectedCase.final_judgment?.text}"</p>
                                 </div>
                             ) : (
                                 <div className="space-y-4">

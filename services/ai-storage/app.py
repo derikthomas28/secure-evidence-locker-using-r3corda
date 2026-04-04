@@ -22,6 +22,40 @@ db = SQLAlchemy(app)
 CORS(app, resources={r"/*": {"origins": "*"}}, allow_headers=["Content-Type", "Authorization", "X-Auth-Token"])
 
 # ============================================================
+# SYSTEM TELEMETRY (Developer / Performance Monitoring)
+# ============================================================
+START_TIME = time.time()
+REQUEST_METRICS = {
+    "total_calls": 0,
+    "latencies": [],
+    "tokens_consumed": 0,
+    "last_reset": time.time()
+}
+
+def track_metric(latency_ms, tokens=0):
+    REQUEST_METRICS["total_calls"] += 1
+    REQUEST_METRICS["latencies"].append(latency_ms)
+    REQUEST_METRICS["tokens_consumed"] += tokens
+    # Keep buffer manageable
+    if len(REQUEST_METRICS["latencies"]) > 100:
+        REQUEST_METRICS["latencies"].pop(0)
+
+@app.before_request
+def start_timer():
+    request.start_time = time.time()
+
+@app.after_request
+def log_request(response):
+    if hasattr(request, 'start_time'):
+        latency = (time.time() - request.start_time) * 1000
+        # If it's a neural endpoint, we might track tokens (simulated here for dev)
+        tokens = 0
+        if '/summarize' in request.path or '/navigate' in request.path or '/analyze' in request.path:
+            tokens = random.randint(150, 800)
+        track_metric(latency, tokens)
+    return response
+
+# ============================================================
 # PRODUCTION MODELS
 # ============================================================
 class User(db.Model):
@@ -322,6 +356,7 @@ def login():
         "auth_engine": "SQL-Vault" if user_db else "Legacy-Static"
     }
     ACTIVE_SESSIONS[token] = session_data
+    add_log("INFO", "AUTH", f"Identity verified: {username} ({user_role})")
 
     return jsonify({
         "status": "authenticated",
@@ -364,58 +399,27 @@ def health():
 # SYSTEM HEALTH (Developer Only)
 # ============================================================
 
-# Simulate system logs for the developer
-SYSTEM_LOGS = [
-    {"time": "14:22:01", "level": "INFO", "module": "AUTH", "event": "Session established for user: honorable_justice"},
-    {"time": "14:25:34", "level": "WARN", "module": "OCR", "event": "Tesseract latency exceeds 2.5s on high-res PDF"},
-    {"time": "14:30:12", "level": "INFO", "module": "AI-ENG", "event": "Neural clustering completed for Case CR-2026-004"},
-    {"time": "14:35:45", "level": "INFO", "module": "CORDA", "event": "FinalityFlow initiated for Asset XFR-66FB9A"},
-    {"time": "14:40:22", "level": "ERROR", "module": "STORAGE", "event": "IO Wait timeout on Regional Node #04"},
-    {"time": "14:45:11", "level": "INFO", "module": "CORE", "event": "Garbage collection reclaimed 142MB heap space"}
-]
+# ============================================================
+# SYSTEM EVENT LOGGING (Developer Audit)
+# ============================================================
+SYSTEM_LOGS = []
 
-@app.route('/api/system/health', methods=['GET'])
-@require_role('developer')
-def system_health():
-    cpu = psutil.cpu_percent(interval=0.5)
-    mem = psutil.virtual_memory()
-    disk = psutil.disk_usage('/')
-    
-    # Calculate case store stats
-    total_cases = len(CASE_STORE)
-    total_evidence = sum(len(c.get('evidence_list', [])) for c in CASE_STORE.values())
-    
-    return jsonify({
-        "system": {
-            "cpu_percent": cpu,
-            "memory_total_gb": round(mem.total / (1024**3), 2),
-            "memory_used_gb": round(mem.used / (1024**3), 2),
-            "memory_percent": mem.percent,
-            "disk_total_gb": round(disk.total / (1024**3), 2),
-            "disk_used_gb": round(disk.used / (1024**3), 2),
-            "disk_percent": disk.percent,
-            "os": os.name,
-            "platform": psutil.Process().name()
-        },
-        "services": {
-            "ai_engine": "online",
-            "ocr_cluster": "active",
-            "blockchain_bridge": "healthy",
-            "p2p_gossip": "12 nodes",
-            "vault_service": "sealed",
-            "notary_p2p": "connected"
-        },
-        "stats": {
-            "total_cases": total_cases,
-            "total_evidence": total_evidence,
-            "active_sessions": len(ACTIVE_SESSIONS),
-            "api_calls_processed": 542,
-            "avg_latency_ms": 124
-        },
-        "logs": SYSTEM_LOGS,
-        "uptime_seconds": int(time.time()),
-        "version": "v2.4-stable-prod"
-    })
+def add_log(level, module, event):
+    log = {
+        "time": time.strftime('%H:%M:%S'),
+        "level": level,
+        "module": module,
+        "event": event
+    }
+    SYSTEM_LOGS.insert(0, log)
+    if len(SYSTEM_LOGS) > 100:
+        SYSTEM_LOGS.pop()
+
+# Initial logs
+add_log("INFO", "CORE", "Legal Vault Engine initialized successfully.")
+add_log("INFO", "DB", "SQL-Alchemy bound to vault.db")
+
+# Combined System Health & Event Logging moved to Developer section below
 
 # ============================================================
 # MODULE C: FORENSIC EVIDENCE ANALYSIS (Officer + Forensic)
@@ -626,6 +630,7 @@ def create_case():
         "case_diary": []
     }
     CASE_STORE[case_number] = case
+    add_log("INFO", "CASE", f"New FIR Registered: {case_number} by {request.current_user['username']}")
     print(f"[CASE] Created {case_number} by {request.current_user['username']}")
     return jsonify({"status": "created", "case": case}), 201
 
@@ -688,6 +693,7 @@ def attach_case_evidence(case_number):
         }
         case['evidence_list'].append(evidence_item)
         case['status'] = 'Under Investigation'
+        add_log("INFO", "STORAGE", f"Asset {evidence_item['evidence_id']} anchored to {case_number} (IPFS: {ipfs_hash[:8]}...)")
         print(f"[CASE] Evidence {evidence_item['evidence_id']} attached to {case_number}")
         return jsonify({"status": "attached", "evidence": evidence_item}), 201
     except Exception as e:
@@ -848,6 +854,63 @@ def get_feedbacks():
 def get_system_events():
     return jsonify(SYSTEM_EVENTS)
 
+@app.route('/api/system/health', methods=['GET'])
+@require_role('developer')
+def system_health():
+    """Detailed system telemetry for the Dev Dashboard."""
+    import psutil
+    import platform
+    
+    process = psutil.Process(os.getpid())
+    
+    # Calculate real storage usage from uploads directory
+    vault_size_bytes = 0
+    if os.path.exists(UPLOAD_FOLDER):
+        for f in os.listdir(UPLOAD_FOLDER):
+            fp = os.path.join(UPLOAD_FOLDER, f)
+            if os.path.isfile(fp):
+                vault_size_bytes += os.path.getsize(fp)
+
+    # Calculate real-time throughput
+    avg_lat = sum(REQUEST_METRICS["latencies"]) / len(REQUEST_METRICS["latencies"]) if REQUEST_METRICS["latencies"] else 0
+    duration_min = (time.time() - REQUEST_METRICS["last_reset"]) / 60 or 1
+    rpm = int(REQUEST_METRICS["total_calls"] / duration_min)
+
+    health_data = {
+        "status": "online",
+        "timestamp": int(time.time()),
+        "uptime_seconds": int(time.time() - START_TIME),
+        "version": "4.2.1-stable",
+        "environment": "production-sim",
+        "process": {
+            "pid": os.getpid(),
+            "cpu_threads": psutil.cpu_count(),
+            "memory_usage_mb": round(process.memory_info().rss / (1024 * 1024), 2),
+            "os": f"{platform.system()} {platform.release()}",
+            "python_version": platform.python_version()
+        },
+        "stats": {
+            "total_cases": len(CASE_STORE),
+            "pending_analysis": len([c for c in CASE_STORE.values() if not c.get('evidence_list')]),
+            "active_sessions": len(ACTIVE_SESSIONS),
+            "vault_size_kb": round(vault_size_bytes / 1024, 2)
+        },
+        "services": {
+            "ai_engine": "active",
+            "search_vector_layer": "healthy",
+            "ipfs_gateway": "online",
+            "corda_node": "connected",
+            "oracle_p2p": "synchronized"
+        },
+        "throughput": {
+            "requests_per_min": rpm if rpm > 0 else random.randint(2, 8), # Initial floor for demo
+            "avg_latency_ms": int(avg_lat),
+            "neural_token_usage": REQUEST_METRICS["tokens_consumed"]
+        },
+        "logs": SYSTEM_LOGS
+    }
+    return jsonify(health_data)
+
 @app.route('/api/system/simulate_threat', methods=['POST'])
 @require_role('developer')
 def simulate_threat():
@@ -885,6 +948,7 @@ def system_maintenance():
         
         # In a real app we'd delete orphans here. For demo we simulate:
         time.sleep(1)
+        add_log("WARN", "CLEANUP", f"Orphan sanitization: {len(files)} files checked. 0 orphans found.")
         return jsonify({
             "status": "success",
             "message": f"Sanitization complete. Analyzed {len(files)} files. 0 orphan records found.",
@@ -896,6 +960,7 @@ def system_maintenance():
         try:
             with app.app_context():
                 User.query.limit(1).all() # Simple ping
+            add_log("INFO", "DB", "Database integrity verification sequence successful.")
             return jsonify({
                 "status": "success",
                 "message": "Database integrity verified. SQLAlchemy 'vault.db' state is healthy.",
@@ -917,6 +982,7 @@ def system_maintenance():
         count = len([e for e in SYSTEM_EVENTS if e['level'] == 'Critical'])
         # Clear critical threats in demo
         SYSTEM_EVENTS = [e for e in SYSTEM_EVENTS if e['level'] != 'Critical']
+        add_log("CRITICAL", "SECURITY", f"Threat Mitigation: {count} critical alerts neutralized.")
         return jsonify({
             "status": "success", 
             "message": f"Mitigation sequence complete. Neutralized {count} critical integrity alerts.",

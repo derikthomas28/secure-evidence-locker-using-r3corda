@@ -12,6 +12,42 @@ import os
 import time
 import random
 import re
+import json
+
+# ============================================================
+# LLM INTEGRATION (GROQ CLOUD)
+# ============================================================
+from dotenv import load_dotenv
+load_dotenv() # Load from .env file
+
+try:
+    from groq import Groq
+    api_key = os.environ.get("GROQ_API_KEY")
+    if not api_key:
+        print("⚠️ [AI] GROQ_API_KEY NOT FOUND. Judicial features will be disabled.")
+        GROQ_CLIENT = None
+    else:
+        GROQ_CLIENT = Groq(api_key=api_key)
+except ImportError:
+    GROQ_CLIENT = None
+
+# ============================================================
+# NLP PRE-PROCESSING (NLTK)
+# ============================================================
+_stemmer = None
+try:
+    import nltk
+    from nltk.stem.snowball import SnowballStemmer
+    # Download required NLTK resources in a fail-safe way
+    try:
+        nltk.data.find('tokenizers/punkt')
+    except LookupError:
+        nltk.download('punkt', quiet=True)
+    _stemmer = SnowballStemmer("english")
+except ImportError:
+    nltk = None
+    _stemmer = None
+
 
 # Optional imports for real AI - tailored for demo environment
 try:
@@ -751,39 +787,71 @@ def _extract_witness_info(text):
 
 def summarize_case(text, filename="case_document"):
     """
-    MODULE A: Judicial AI Bench Assistant
-    Generates an executive case summary from legal documents.
-    
-    In production, this would use a fine-tuned LLM. For this demo,
-    we use intelligent NLP extraction to demonstrate the concept.
+    MODULE A: Judicial AI Bench Assistant (Neural Edition)
+    Generates an executive case summary using Groq Llama-3 LLM.
     """
     
     # 1. Basic Statistics
     word_count = len(text.split())
     sentence_count = len(re.split(r'[.!?]+', text))
     
-    # 2. Extract key legal elements
+    # 2. Extract key legal elements (Legacy Heuristics)
     key_phrases = _extract_key_phrases(text)
     mentioned_sections = _extract_sections_from_text(text)
     prosecution_args, defense_args = _identify_parties(text)
     witnesses = _extract_witness_info(text)
+
+    # 3. Neural Summarization via Groq
+    executive_summary = "Failed to reach Neural Engine. Using legacy extraction."
+    if GROQ_CLIENT:
+        try:
+            prompt = f"""
+            You are a Judicial AI Assistant helping an Indian High Court Judge. Summarize this case document:
+            
+            "{text[:6000]}"
+            
+            Output ONLY a JSON object:
+            {{
+                "summary": "Full executive summary...",
+                "pros": ["Point 1", "Point 2", "Point 3"],
+                "cons": ["Point 1", "Point 2", "Point 3"],
+                "laws": [{{ "title": "Section Name", "bns": "...", "ipc": "..." }}],
+                "precedents": [
+                    {{ "case_name": "State vs...", "citation": "2023 INSC...", "relevance": "Similar motive..." }},
+                    {{ "case_name": "...", "citation": "...", "relevance": "..." }}
+                ],
+                "disposition_estimate": "High/Medium/Low conviction probability",
+                "judgment_points": ["Drafting point 1", "Drafting point 2"]
+            }}
+            """
+            completion = GROQ_CLIENT.chat.completions.create(
+                messages=[{"role": "user", "content": prompt}],
+                model="llama-3.3-70b-versatile",
+                temperature=0.1,
+                response_format={ "type": "json_object" }
+            )
+            ai_data = json.loads(completion.choices[0].message.content)
+            
+            report.update({
+                "executive_summary": ai_data.get("summary", report["executive_summary"]),
+                "prosecution_arguments": ai_data.get("pros", report["prosecution_arguments"]),
+                "defense_arguments": ai_data.get("cons", report["defense_arguments"]),
+                "applicable_laws": ai_data.get("laws", []),
+                "precedents": ai_data.get("precedents", []),
+                "bench_intel": {
+                    "disposition": ai_data.get("disposition_estimate", "Determined by Trial"),
+                    "drafting_guide": ai_data.get("judgment_points", [])
+                }
+            })
+        except Exception as e:
+            print(f"Judicial Neural Expansion Error: {e}")
+            # Fallback to extractive summary if Groq fails
+            sentences = [s.strip() for s in re.split(r'[.!?]+', text) if len(s.strip()) > 30]
+            scored = sorted([(sum(1 for word in sent.lower().split() if word in set(key_phrases + ["therefore", "guilty"])), sent) for sent in sentences], reverse=True)
+            report["executive_summary"] = " ".join([s[1] for s in scored[:5]])
     
-    # 3. Generate Executive Summary
-    # Extract the most important sentences (simple extractive summarization)
-    sentences = [s.strip() for s in re.split(r'[.!?]+', text) if len(s.strip()) > 30]
-    
-    # Score sentences by keyword density
-    scored = []
-    importance_words = set(key_phrases + ["therefore", "hence", "concluded", "held", "ordered", "directed", "guilty", "innocent", "acquitted", "convicted"])
-    
-    for sent in sentences:
-        score = sum(1 for word in sent.lower().split() if word in importance_words)
-        scored.append((score, sent))
-    
-    scored.sort(key=lambda x: x[0], reverse=True)
-    summary_sentences = [s[1] for s in scored[:5]]
-    
-    # 4. Match to known legal sections from our database
+    # 4. Match to known legal sections (DB Cross-Reference)
+
     applicable_laws = []
     text_lower = text.lower()
     for section_data in LEGAL_SECTIONS:
@@ -848,13 +916,11 @@ _stemmer = None
 
 def _stem_text(text):
     """Stem text using SnowballStemmer if available."""
-    global _stemmer
-    from nltk.stem.snowball import SnowballStemmer
-    if _stemmer is None:
-        _stemmer = SnowballStemmer("english")
-    
-    words = re.findall(r'\w+', text.lower())
-    return " ".join([_stemmer.stem(w) for w in words])
+    if _stemmer:
+        words = re.findall(r'\w+', text.lower())
+        return " ".join([_stemmer.stem(w) for w in words])
+    return text.lower() # Fallback to lower case if NLTK is missing
+
 
 def _build_nlp_index():
     """Build TF-IDF vectorizer and matrix from the legal knowledge base."""
@@ -978,65 +1044,118 @@ def navigate_legal_query(query):
         # Merge keyword results but prioritize if they are very strong
         matches = keyword_hit + matches
     
+    # Threshold filtering
+    matches = []
+    for idx in ranked_indices:
+        score = similarities[idx]
+        if score < 0.005: break
+        if len(matches) >= 6: break
+        
+        section = _DYNAMIC_LEGAL_SECTIONS[idx] if _DYNAMIC_LEGAL_SECTIONS else LEGAL_SECTIONS[idx]
+        final_score = float(score)
+        if section.get("dataset") == "BNS": final_score *= 1.3
+            
+        matches.append({"section": section, "score": final_score})
+    
+    matches.sort(key=lambda x: x["score"], reverse=True)
+    
+    # Use keyword fallback if NLP is weak
+    if keyword_hit and (not matches or matches[0]['score'] < 0.1):
+        matches = keyword_hit + matches
+
+    # Use keyword fallback if NLP is weak
+    if keyword_hit and (not matches or matches[0]['score'] < 0.1):
+        matches = keyword_hit + matches
+
+    # --- NEURAL CONSULTANT STAGE (GROQ) ---
+    consultation_report = {
+        "status": "match_found",
+        "consultancy_summary": "I have analyzed your situation against current Indian Law (BNS/IPC).",
+        "action_plan": [],
+        "primary_law": {},
+        "rights_bulletin": [],
+        "engine": "Neural Bench Consultant v3"
+    }
+
+    # Always invoke Groq for pure "Consultancy" feel
+    if GROQ_CLIENT:
+        try:
+            # We ask Groq to act as a Senior Legal Advisor
+            db_context = f"Internal laws found: {', '.join([m['section']['title'] for m in matches[:2]])}" if matches else ""
+            prompt = f"""
+            You are a Senior Legal Consultant in India. A citizen is asking for your help: "{query}".
+            {db_context}
+            
+            Provide a professional, empathetic, and highly structured legal consultation report.
+            
+            1. SUMMARY: A 2-sentence professional legal overview.
+            2. ACTION PLAN: Exactly 4-5 numbered points on what they must do IMMEDIATELY (e.g. Evidence, MACT, Legal Notice).
+            3. YOUR RIGHTS: 3 specific rights under current law (BNS/IPC/Special Acts).
+            4. PRIMARY PROVISION: Name of the Act and Section most relevant.
+            
+            Output ONLY a JSON object:
+            {{
+                "summary": "...",
+                "action_items": ["...", "...", "...", "..."],
+                "rights": ["...", "...", "..."],
+                "relevant_law": "...",
+                "legal_section_no": "...",
+                "compensation_notes": "..."
+            }}
+            """
+            
+            completion = GROQ_CLIENT.chat.completions.create(
+                messages=[{"role": "user", "content": prompt}],
+                model="llama-3.3-70b-versatile",
+                temperature=0.2,
+                response_format={ "type": "json_object" }
+            )
+            
+            ai_res = json.loads(completion.choices[0].message.content)
+            
+            # Map AI response to our reporting structure
+            consultation_report.update({
+                "consultancy_summary": ai_res.get("summary", ""),
+                "action_plan": ai_res.get("action_items", []),
+                "rights_bulletin": ai_res.get("rights", []),
+                "primary_law": {
+                    "title": ai_res.get("relevant_law", "General Legal Provision"),
+                    "section": ai_res.get("legal_section_no", "N/A"),
+                    "compensation_notes": ai_res.get("compensation_notes", "Varies by evidence")
+                }
+            })
+            
+            # Fallback to DB Match if AI fails to provide a law
+            if not ai_res.get("legal_section_no") and matches:
+                consultation_report["primary_law"]["title"] = matches[0]["section"]["title"]
+                consultation_report["primary_law"]["section"] = matches[0]["section"].get("bns", matches[0]["section"].get("ipc"))
+
+            return consultation_report
+            
+        except Exception as e:
+            print(f"Consultancy Engine Error: {e}")
+            # Fallback to basic structure below
+
+    # Legacy Fallback if Groq unavailable
     if not matches:
-        return {
-            "status": "no_match",
-            "message": "I could not identify a specific BNS/IPC section for your situation. Please include more details (e.g., 'stole a car', 'beaten with a stick', 'cheated on WhatsApp').",
-            "suggestion": "Consult the Help menu for example queries."
-        }
+        return {"status": "no_match", "message": "Could not build the consultation."}
     
     primary = matches[0]["section"]
-    primary_score = matches[0]["score"]
-    
-    results = {
+    return {
         "status": "match_found",
-        "query_understood_as": f"Potential legal situation related to: {primary['title']}",
-        "primary_match": {
+        "consultancy_summary": f"Your situation relates to: {primary['title']}.",
+        "action_plan": primary.get("procedures", ["Contact local authorities", "File an FIR"]),
+        "rights_bulletin": primary.get("rights", ["Right to Legal Counsel"]),
+        "primary_law": {
             "title": primary["title"],
-            "bns_section": f"Section {primary['bns']}" if primary['bns'] != "N/A" else "N/A",
-            "ipc_section": f"Section {primary['ipc']}" if primary['ipc'] != "N/A" else "N/A",
-            "description": primary["desc"],
-            "punishment": primary.get("punishment", "Determined by Court"),
-            "relevance_score": min(99, int(primary_score * 120)), # Adjusted scaling for better visibility
-            "metadata": primary.get("metadata", {}),
-            "dataset": primary.get("dataset", "Unknown")
+            "section": primary.get("bns", primary.get("ipc")),
+            "compensation_notes": "Determined by Court"
         },
-        "available_defenses": primary.get("defenses", [
-            "Right to legal representation",
-            "Right to be informed of grounds of arrest",
-            "Presumption of innocence until proven guilty"
-        ]),
-        "procedures": primary.get("procedures", [
-            "Filing of First Information Report (FIR) at nearest Police Station.",
-            "Investigation by Designated Police Officer.",
-            "Submission of Charge Sheet to the Magistrate.",
-            "Framing of Charges by the Court.",
-            "Trial proceedings and examination of evidence."
-        ]),
-        "citizen_rights": primary.get("rights", [
-            "Right to remain silent (Art. 20(3) of Constitution).",
-            "Right to consult and be defended by a legal practitioner.",
-            "Right to be produced before a magistrate within 24 hours of arrest."
-        ]),
-        "your_rights": primary.get("rights", []), # Keep for legacy compat
-        "related_sections": [],
-        "fundamental_rights": FUNDAMENTAL_RIGHTS,
-        "nlp_engine": "TF-IDF Cosine Similarity v2 (Dynamic Data)",
-        "total_laws_searched": len(_DYNAMIC_LEGAL_SECTIONS) if _DYNAMIC_LEGAL_SECTIONS else len(LEGAL_SECTIONS),
-        "disclaimer": "This is AI-generated legal information for educational purposes only. It does NOT constitute legal advice. Please consult a qualified advocate for your specific case."
+        "engine": "Legacy Local Database"
     }
-    
-    # Add related matches
-    for match in matches[1:4]:
-        sec = match["section"]
-        results["related_sections"].append({
-            "title": sec["title"],
-            "bns_section": f"Section {sec['bns']}" if sec['bns'] != "N/A" else "N/A",
-            "ipc_section": f"Section {sec['ipc']}" if sec['ipc'] != "N/A" else "N/A",
-            "relevance": f"Similarity: {min(99, int(match['score'] * 120))}%"
-        })
-    
-    return results
+
+
+
 
 
 def _keyword_fallback(query):

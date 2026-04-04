@@ -1,0 +1,40 @@
+{
+    "cases": [
+        {
+            "case_id": "CR-2026-003",
+            "name": "Domestic Assault Case",
+            "fir_file": "mock_data/cases/CR-2026-003_Domestic.txt",
+            "evidence": [
+                {
+                    "type": "photo",
+                    "description": "Bloody knife found at scene",
+                    "file": "mock_data/evidence_images/evidence_knife.png"
+                }
+            ]
+        },
+        {
+            "case_id": "CR-2026-004",
+            "name": "Cyber Phishing Investigation",
+            "fir_file": "mock_data/cases/CR-2026-004_CyberCrime.txt",
+            "evidence": [
+                {
+                    "type": "cctv",
+                    "description": "Suspect leaving vicinity of ATM",
+                    "file": "mock_data/evidence_images/suspect_cctv.png"
+                }
+            ]
+        },
+        {
+            "case_id": "CR-2026-005",
+            "name": "Mall Robbery Forensic Update",
+            "fir_file": "uploads/FIR_102_2026.txt",
+            "evidence": [
+                {
+                    "type": "photo",
+                    "description": "Fingerprint with forensic marker 14",
+                    "file": "mock_data/evidence_images/forensic_marker_fingerprint.png"
+                }
+            ]
+        }
+    ]
+}

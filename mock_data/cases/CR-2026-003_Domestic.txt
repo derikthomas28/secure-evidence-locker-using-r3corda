@@ -1,0 +1,22 @@
+CASE ID: CR-2026-003
+POLICE STATION: RYME CITY NORTH
+INCIDENT TYPE: DOMESTIC VIOLENCE / AGGRAVATED ASSAULT
+STATUS: ACTIVE INVESTIGATION
+
+COMPLAINANT DETAILS:
+Name: Anjali Singh
+Address: 112 Green Meadows Apt, Sector 9
+
+ACCUSED DETAILS:
+Name: Suresh Singh (Husband)
+
+NARRATIVE:
+The complainant reported a call for help from a neighbor who heard loud noises and shouting. Upon arrival, the police found the victim with visible marks of physical abuse. The accused was present at the scene and was taken into custody for questioning.
+
+EVIDENCE:
+1. Photograph of physical injuries.
+2. Blood-stained clothing of the victim.
+3. CCTV footage from the apartment building corridor.
+
+BLOCKCHAIN REFERENCE:
+Genesis block: BK-1102-AS - Anchored to Corda Node 01.

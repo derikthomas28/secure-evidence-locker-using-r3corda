@@ -151,8 +151,8 @@ export default function JudicialAssistant({ authHeaders, handleLogout }) {
                             {/* Stats Bar */}
                             <div className="grid grid-cols-4 gap-4">
                                 <StatCard icon={FileText} label="Words" value={report?.document_stats?.word_count || 0} color="text-blue-400" />
-                                <StatCard icon={Layers} label="Pages" value={`~${report?.document_stats?.pages_estimated || 0}`} color="text-purple-400" />
-                                <StatCard icon={Hash} label="Nodes" value={report?.sections_mentioned?.length || 0} color="text-cyan-400" />
+                                <StatCard icon={Scale} label="Disposition" value={report?.bench_intel?.disposition || 'N/A'} color="text-purple-400" />
+                                <StatCard icon={Hash} label="Laws" value={report?.applicable_laws?.length || 0} color="text-cyan-400" />
                                 <StatCard icon={Clock} label="Latency" value={`${report?.processing_time_ms || 0}ms`} color="text-emerald-400" />
                             </div>
 
@@ -160,55 +160,57 @@ export default function JudicialAssistant({ authHeaders, handleLogout }) {
                             <div className="glass-card rounded-3xl p-8 border-blue-500/10">
                                 <div className="flex justify-between items-center mb-6">
                                     <h4 className="text-[10px] font-black text-blue-400 uppercase tracking-widest flex items-center">
-                                        <Shield className="w-3 h-3 mr-2" /> Neural Brief
+                                        <Shield className="w-3 h-3 mr-2" /> Neural Briefing
                                     </h4>
                                     <span className={`px-4 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest border ${report?.document_stats?.complexity_rating === 'High' ? 'bg-red-500/10 text-red-400 border-red-500/30' :
                                         report?.document_stats?.complexity_rating === 'Medium' ? 'bg-amber-500/10 text-amber-400 border-amber-500/30' :
                                             'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
                                         }`}>{report?.document_stats?.complexity_rating || 'Standard'} Complexity</span>
                                 </div>
-                                <p className="text-slate-300 text-sm leading-relaxed font-medium">{report?.executive_summary}</p>
+                                <p className="text-slate-300 text-sm leading-relaxed font-bold">{report?.executive_summary}</p>
                             </div>
 
-                            {/* Prosecution vs Defense */}
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <ArgumentBlock title="Prosecution Logic" items={report?.prosecution_arguments || []} color="text-red-400" borderColor="border-red-500/20" />
-                                <ArgumentBlock title="Defense Logic" items={report?.defense_arguments || []} color="text-blue-400" borderColor="border-blue-500/20" />
-                            </div>
-
-                            {/* Applicable Laws */}
-                            {report?.applicable_laws?.length > 0 && (
-                                <div className="glass-card rounded-3xl p-8 border-blue-500/10">
-                                    <h4 className="text-[10px] font-black text-cyan-400 uppercase tracking-widest mb-4 flex items-center">
-                                        <Terminal className="w-3 h-3 mr-2" /> BNS / IPC Cross-Reference
+                            {/* Case Precedents (New) */}
+                            {report?.precedents?.length > 0 && (
+                                <div className="glass-card rounded-3xl p-8 border-purple-500/10 bg-purple-500/5">
+                                    <h4 className="text-[10px] font-black text-purple-400 uppercase tracking-widest mb-6 flex items-center">
+                                        <BookOpen className="w-3 h-3 mr-2" /> Judicial Precedents (SC/HC)
                                     </h4>
-                                    <div className="space-y-2">
-                                        {report.applicable_laws.map((law, i) => (
-                                            <div key={i} className="flex items-center justify-between p-4 bg-slate-950/60 rounded-xl border border-white/5 group hover:border-blue-500/30 transition-all">
-                                                <span className="text-sm font-bold text-slate-200">{law?.title}</span>
-                                                <div className="flex space-x-2">
-                                                    <span className="text-[9px] font-black text-blue-400 bg-blue-500/10 px-3 py-1 rounded-lg border border-blue-500/20">BNS {law?.bns}</span>
-                                                    <span className="text-[9px] font-black text-slate-500 bg-slate-800 px-3 py-1 rounded-lg">IPC {law?.ipc}</span>
+                                    <div className="space-y-4">
+                                        {report.precedents.map((prec, i) => (
+                                            <div key={i} className="p-4 bg-slate-900 border border-white/5 rounded-2xl group hover:border-purple-500/30 transition-all">
+                                                <div className="flex justify-between items-start mb-2">
+                                                    <span className="text-xs font-black text-white">{prec.case_name}</span>
+                                                    <span className="text-[9px] font-mono text-purple-400">{prec.citation}</span>
                                                 </div>
+                                                <p className="text-[11px] text-slate-500 italic">"Relevance: {prec.relevance}"</p>
                                             </div>
                                         ))}
                                     </div>
                                 </div>
                             )}
 
-                            {/* AI Recommendations */}
-                            <div className="glass-card rounded-3xl p-8 border-blue-500/10">
-                                <h4 className="text-[10px] font-black text-emerald-400 uppercase tracking-widest mb-4 flex items-center">
-                                    <Cpu className="w-3 h-3 mr-2" /> Bench Optimization Plan
+                            {/* Prosecution vs Defense */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <ArgumentBlock title="Prosecution Core" items={report?.prosecution_arguments || []} color="text-red-400" borderColor="border-red-500/20" />
+                                <ArgumentBlock title="Defense Core" items={report?.defense_arguments || []} color="text-blue-400" borderColor="border-blue-500/20" />
+                            </div>
+
+                            {/* Judgment Drafting Guide (New) */}
+                            <div className="glass-card rounded-[2.5rem] p-10 border-blue-500/10 bg-slate-950">
+                                <h4 className="text-[10px] font-black text-emerald-400 uppercase tracking-widest mb-6 flex items-center">
+                                    <FileText className="w-4 h-4 mr-3" /> Bench Decision Template
                                 </h4>
-                                <ul className="space-y-3">
-                                    {report?.ai_recommendations?.map((rec, i) => (
-                                        <li key={i} className="text-sm text-slate-400 flex items-start">
-                                            <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full mr-4 mt-1.5 shadow-[0_0_8px_rgba(16,185,129,0.8)]" />
-                                            {rec}
-                                        </li>
+                                <div className="space-y-4">
+                                    {report?.bench_intel?.drafting_guide?.map((point, i) => (
+                                        <div key={i} className="flex items-start">
+                                            <div className="w-6 h-6 flex-shrink-0 bg-emerald-500/10 border border-emerald-500/20 rounded flex items-center justify-center text-[9px] font-black text-emerald-500 mr-4">
+                                                {i + 1}
+                                            </div>
+                                            <p className="text-sm text-slate-400 italic">"{point}"</p>
+                                        </div>
                                     ))}
-                                </ul>
+                                </div>
                             </div>
                         </div>
                     )}

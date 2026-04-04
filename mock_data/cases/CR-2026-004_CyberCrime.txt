@@ -1,0 +1,22 @@
+CASE ID: CR-2026-004
+POLICE STATION: RYME CITY CYBER CELL
+INCIDENT TYPE: FINANCIAL FRAUD / PHISHING
+STATUS: CASE REGISTERED
+
+COMPLAINANT DETAILS:
+Name: Amit Mehra
+Address: B-402 Orchid Towers, City Center
+
+ACCUSED DETAILS:
+Unknown. Domain: flash-bank-security.tk (Registered in Mauritius)
+
+NARRATIVE:
+The complainant received an email pretending to be from his bank, requesting an urgent password update. After clicking the link and entering credentials, 1.5 Lakhs INR was transferred to an unknown account.
+
+EVIDENCE:
+1. Phishing Email source code.
+2. Screenshot of the deceptive website.
+3. Transaction logs from HDFC Bank.
+
+BLOCKCHAIN REFERENCE:
+Digital CID: 5542-MM10-CC - Verified by R3 Corda Notary.
