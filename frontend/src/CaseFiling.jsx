@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import {
     Plus, FileText, Upload, CheckCircle, AlertTriangle,
-    Activity, Search, MapPin, Calendar, User, Hash, FolderOpen, Lock
+    Activity, Search, MapPin, Calendar, User, Hash, FolderOpen, Lock, Shield
 } from 'lucide-react';
 
 const API_AI_URL = "http://127.0.0.1:5000";
@@ -232,8 +232,8 @@ function EvidenceUpload({ caseDetail, authHeaders, handleLogout, onDone }) {
 
             <button onClick={submit} disabled={isSubmitting}
                 className="w-full py-5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-black text-xs uppercase tracking-[0.2em] rounded-2xl transition-all disabled:opacity-50 flex items-center justify-center space-x-3 shadow-2xl shadow-purple-500/20 active:scale-95">
-                {isProcessing ? <Activity className="animate-spin w-5 h-5" /> : <Shield className="w-5 h-5" />}
-                <span>{isSubmitting ? 'Anchoring Evidence...' : 'Certify & Anchore Evidence'}</span>
+                {isSubmitting ? <Activity className="animate-spin w-5 h-5" /> : <Shield className="w-5 h-5" />}
+                <span>{isSubmitting ? 'Anchoring Evidence...' : 'Certify & Anchor Evidence'}</span>
             </button>
 
             <p className="text-center text-[9px] text-slate-600 font-bold uppercase tracking-widest flex items-center justify-center space-x-2">

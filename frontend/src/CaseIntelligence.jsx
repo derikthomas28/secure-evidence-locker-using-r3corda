@@ -3,7 +3,7 @@ import axios from 'axios';
 import {
     Search, Shield, FileText, AlertTriangle, CheckCircle, Activity,
     Hash, Clock, User, MapPin, Calendar, Scale, Gavel, Eye,
-    ChevronDown, ChevronUp, Cpu, BarChart3, BookOpen, Terminal, Zap, Lock
+    ChevronDown, ChevronUp, Cpu, BarChart3, BookOpen, Terminal, Zap, Lock, Upload
 } from 'lucide-react';
 
 const API_AI_URL = "http://127.0.0.1:5000";
@@ -37,8 +37,18 @@ function ProbabilityMeter({ value, label, color }) {
     );
 }
 
-function EvidenceCard({ ev, index }) {
+function getRelevanceColor(score) {
+    if (score >= 70) return 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30';
+    if (score >= 40) return 'text-yellow-400 bg-yellow-500/10 border-yellow-500/30';
+    return 'text-red-400 bg-red-500/10 border-red-500/30';
+}
+
+function EvidenceCard({ ev, index, authHeaders, handleLogout, caseNumber }) {
     const [open, setOpen] = useState(false);
+    const [showVerify, setShowVerify] = useState(false);
+    const [verifyFile, setVerifyFile] = useState(null);
+    const [isVerifying, setIsVerifying] = useState(false);
+    const [verifyResult, setVerifyResult] = useState(null);
     const fr = ev.forensic_result || {};
     const isPhoto = ev.type === 'photo';
     const severity = fr.severity || fr.trust_label || 'Standard';
@@ -46,6 +56,27 @@ function EvidenceCard({ ev, index }) {
         : severity === 'High' ? 'text-orange-400 bg-orange-500/10 border-orange-500/30'
         : severity === 'Good' ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30'
         : 'text-blue-400 bg-blue-500/10 border-blue-500/30';
+    const relColor = getRelevanceColor(ev.relevance_score || 0);
+
+    const handleVerify = async () => {
+        if (!verifyFile) return;
+        setIsVerifying(true);
+        setVerifyResult(null);
+        
+        try {
+            const formData = new FormData();
+            formData.append('file', verifyFile);
+            const res = await axios.post(`${API_AI_URL}/api/evidence/${ev.evidence_id}/verify`, formData, {
+                headers: authHeaders()
+            });
+            setVerifyResult(res.data);
+        } catch (err) {
+            if (err.response?.status === 401) handleLogout();
+            setVerifyResult({ error: err.response?.data?.error || err.message });
+        } finally {
+            setIsVerifying(false);
+        }
+    };
 
     return (
         <div className="glass-card rounded-2xl border border-white/5 overflow-hidden">
@@ -62,8 +93,11 @@ function EvidenceCard({ ev, index }) {
                     </div>
                 </div>
                 <div className="flex items-center space-x-3">
+                    <span className={`px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest border ${relColor}`}>
+                        Relevance: {ev.relevance_score || 0}%
+                    </span>
                     <span className={`px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest border ${sevColor}`}>{severity}</span>
-                    {open ? <ChevronUp className="w-4 h-4 text-slate-500" /> : <ChevronDown className="w-4 h-4 text-slate-500" />}
+                    {open ? <ChevronUp className="w-4 h-4 text-slate-50" /> : <ChevronDown className="w-4 h-4 text-slate-50" />}
                 </div>
             </button>
             {open && (
@@ -106,6 +140,81 @@ function EvidenceCard({ ev, index }) {
                             <p className="text-sm text-white font-bold">{fr.scene_classification}</p>
                         </div>
                     )}
+                    
+                    {/* Chain of Custody */}
+                    {ev.chain_of_custody && ev.chain_of_custody.length > 0 && (
+                        <div className="p-4 bg-slate-950/60 rounded-xl border border-white/5">
+                            <p className="text-[9px] font-black text-blue-400 uppercase tracking-widest mb-3 flex items-center">
+                                <Lock className="w-3 h-3 mr-2" /> Chain of Custody
+                            </p>
+                            <div className="space-y-2">
+                                {ev.chain_of_custody.map((coc, i) => (
+                                    <div key={i} className="flex items-center justify-between p-2 bg-slate-900/40 rounded-lg border border-white/5">
+                                        <div>
+                                            <span className="text-[10px] font-black text-blue-400 uppercase">{coc.action}</span>
+                                            <p className="text-[9px] text-slate-400">{coc.user_display_name || coc.username} · {new Date(coc.timestamp * 1000).toLocaleString()}</p>
+                                        </div>
+                                        {coc.notes && <p className="text-[8px] text-slate-500 font-mono">{coc.notes}</p>}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                    
+                    {/* Verification Section */}
+                    <div className="p-4 bg-slate-950/60 rounded-xl border border-white/5">
+                        <button onClick={() => setShowVerify(!showVerify)} className="w-full text-left">
+                            <p className="text-[9px] font-black text-purple-400 uppercase tracking-widest mb-2 flex items-center">
+                                <Shield className="w-3 h-3 mr-2" /> Verify Evidence Authenticity
+                            </p>
+                        </button>
+                        {showVerify && (
+                            <div className="space-y-3 mt-3">
+                                <div onClick={() => document.getElementById(`verify-${ev.evidence_id}`).click()}
+                                    className="border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-all border-white/10 hover:border-purple-500/30">
+                                    <input type="file" id={`verify-${ev.evidence_id}`} className="hidden"
+                                        onChange={e => { setVerifyFile(e.target.files[0]); setVerifyResult(null); }} />
+                                    <Upload className="w-8 h-8 mx-auto mb-2 text-slate-600" />
+                                    <p className="text-sm font-bold text-white">{verifyFile ? verifyFile.name : 'Click to Select File for Verification'}</p>
+                                </div>
+                                <button onClick={handleVerify} disabled={!verifyFile || isVerifying}
+                                    className="w-full py-3 bg-purple-600 hover:bg-purple-500 text-white font-black text-xs uppercase rounded-xl transition-all disabled:opacity-50 flex items-center justify-center space-x-2">
+                                    {isVerifying ? <Activity className="animate-spin w-4 h-4" /> : <Shield className="w-4 h-4" />}
+                                    <span>{isVerifying ? 'Verifying...' : 'Verify Evidence'}</span>
+                                </button>
+                                {verifyResult && (
+                                    <div className={`p-4 rounded-xl border ${verifyResult.is_valid ? 'bg-emerald-500/10 border-emerald-500/30' : verifyResult.error ? 'bg-red-500/10 border-red-500/30' : 'bg-amber-500/10 border-amber-500/30'}`}>
+                                        {verifyResult.error ? (
+                                            <div className="flex items-center space-x-3">
+                                                <AlertTriangle className="w-5 h-5 text-red-400 flex-shrink-0" />
+                                                <div>
+                                                    <p className="text-sm font-bold text-red-400">Verification Failed</p>
+                                                    <p className="text-xs text-red-200">{verifyResult.error}</p>
+                                                </div>
+                                            </div>
+                                        ) : verifyResult.is_valid ? (
+                                            <div className="flex items-center space-x-3">
+                                                <CheckCircle className="w-5 h-5 text-emerald-400 flex-shrink-0" />
+                                                <div>
+                                                    <p className="text-sm font-bold text-emerald-400">✅ Evidence is Authentic!</p>
+                                                    <p className="text-xs text-emerald-200">Hash matches stored value.</p>
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <div className="flex items-center space-x-3">
+                                                <AlertTriangle className="w-5 h-5 text-amber-400 flex-shrink-0" />
+                                                <div>
+                                                    <p className="text-sm font-bold text-amber-400">⚠️ Evidence Tampered!</p>
+                                                    <p className="text-xs text-amber-200">Hash does not match stored value.</p>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                    
                     <div className="text-[9px] text-slate-600 font-bold uppercase tracking-widest">
                         Submitted: {new Date(ev.submitted_at * 1000).toLocaleString()}
                     </div>
@@ -233,7 +342,16 @@ export default function CaseIntelligence({ authHeaders, handleLogout }) {
                         <div className="space-y-4">
                             <h3 className="text-[10px] font-black text-blue-400 uppercase flex items-center"><Terminal className="w-3 h-3 mr-2" /> Forensic Evidence Vault</h3>
                             <div className="space-y-3">
-                                {selectedCase.evidence_list.map((ev, i) => <EvidenceCard key={i} ev={ev} index={i} />)}
+                                {selectedCase.evidence_list.map((ev, i) => (
+                                    <EvidenceCard 
+                                        key={i} 
+                                        ev={ev} 
+                                        index={i} 
+                                        authHeaders={authHeaders} 
+                                        handleLogout={handleLogout}
+                                        caseNumber={selectedCase.case_number}
+                                    />
+                                ))}
                             </div>
                         </div>
 

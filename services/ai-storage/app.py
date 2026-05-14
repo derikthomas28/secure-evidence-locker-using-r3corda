@@ -8,22 +8,25 @@ import hashlib
 import secrets
 import psutil
 import random
+import re
+import tempfile
+import shutil
 
 from flask_sqlalchemy import SQLAlchemy
 import json
+from flask_bcrypt import Bcrypt
+from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
 
 app = Flask(__name__)
-# Secure database configuration (PostgreSQL for production / SQLite for local)
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///vault.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['JWT_SECRET_KEY'] = os.environ.get('JWT_SECRET_KEY', 'secure-evidence-locker-super-secret-key-2026')
 db = SQLAlchemy(app)
+bcrypt = Bcrypt(app)
+jwt = JWTManager(app)
 
-# Explicitly allow the custom X-Auth-Token header and all origins
 CORS(app, resources={r"/*": {"origins": "*"}}, allow_headers=["Content-Type", "Authorization", "X-Auth-Token"])
 
-# ============================================================
-# SYSTEM TELEMETRY (Developer / Performance Monitoring)
-# ============================================================
 START_TIME = time.time()
 REQUEST_METRICS = {
     "total_calls": 0,
@@ -36,7 +39,6 @@ def track_metric(latency_ms, tokens=0):
     REQUEST_METRICS["total_calls"] += 1
     REQUEST_METRICS["latencies"].append(latency_ms)
     REQUEST_METRICS["tokens_consumed"] += tokens
-    # Keep buffer manageable
     if len(REQUEST_METRICS["latencies"]) > 100:
         REQUEST_METRICS["latencies"].pop(0)
 
@@ -48,126 +50,97 @@ def start_timer():
 def log_request(response):
     if hasattr(request, 'start_time'):
         latency = (time.time() - request.start_time) * 1000
-        # If it's a neural endpoint, we might track tokens (simulated here for dev)
         tokens = 0
         if '/summarize' in request.path or '/navigate' in request.path or '/analyze' in request.path:
             tokens = random.randint(150, 800)
         track_metric(latency, tokens)
     return response
 
-# ============================================================
-# PRODUCTION MODELS
-# ============================================================
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
-    password_hash = db.Column(db.String(120), nullable=False)
+    password_hash = db.Column(db.String(256), nullable=False)
     role = db.Column(db.String(20), nullable=False)
     display_name = db.Column(db.String(100))
     badge = db.Column(db.String(50))
     clearance = db.Column(db.String(100))
-    permissions_json = db.Column(db.Text)  # Stores JSON string of permissions
+    permissions_json = db.Column(db.Text)
 
     def get_permissions(self):
         return json.loads(self.permissions_json) if self.permissions_json else {}
 
-# Create DB tables inside the app context
-with app.app_context():
-    db.create_all()
+class Case(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    case_number = db.Column(db.String(50), unique=True, nullable=False)
+    title = db.Column(db.String(255), nullable=False)
+    incident_type = db.Column(db.String(100), nullable=False)
+    description = db.Column(db.Text, nullable=False)
+    location = db.Column(db.String(255), nullable=False)
+    incident_date = db.Column(db.String(20), nullable=False)
+    complainant = db.Column(db.String(255), nullable=False)
+    accused = db.Column(db.String(255), default="Unknown")
+    fir_number = db.Column(db.String(100))
+    investigating_officer = db.Column(db.String(255))
+    status = db.Column(db.String(50), default="FIR Registered")
+    created_at = db.Column(db.Integer, nullable=False)
+    created_by = db.Column(db.String(80), nullable=False)
+    case_diary_json = db.Column(db.Text, default="[]")
+    final_judgment_json = db.Column(db.Text)
+
+    def get_case_diary(self):
+        return json.loads(self.case_diary_json) if self.case_diary_json else []
+
+    def get_final_judgment(self):
+        return json.loads(self.final_judgment_json) if self.final_judgment_json else None
+
+class Evidence(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    evidence_id = db.Column(db.String(50), nullable=False)
+    case_number = db.Column(db.String(50), db.ForeignKey('case.case_number'), nullable=False)
+    filename = db.Column(db.String(255), nullable=False)
+    type = db.Column(db.String(50), nullable=False)
+    description = db.Column(db.Text)
+    sha256 = db.Column(db.String(256), nullable=False)
+    ipfs_hash = db.Column(db.String(256))
+    forensic_result_json = db.Column(db.Text)
+    submitted_by = db.Column(db.String(80), nullable=False)
+    submitted_by_name = db.Column(db.String(255))
+    submitted_at = db.Column(db.Integer, nullable=False)
+    measurements = db.Column(db.Text)
+    physical_objects = db.Column(db.Text)
+    branch_of = db.Column(db.String(50))
+    relevance_score = db.Column(db.Float, default=0.0)
+
+    def get_forensic_result(self):
+        return json.loads(self.forensic_result_json) if self.forensic_result_json else {}
+
+class AuditLog(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    timestamp = db.Column(db.Integer, nullable=False)
+    level = db.Column(db.String(20), nullable=False)
+    module = db.Column(db.String(50), nullable=False)
+    event = db.Column(db.Text, nullable=False)
+    username = db.Column(db.String(80))
+    ip_address = db.Column(db.String(50))
+
+class ChainOfCustody(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    evidence_id = db.Column(db.String(50), nullable=False)
+    case_number = db.Column(db.String(50), nullable=False)
+    action = db.Column(db.String(50), nullable=False)
+    username = db.Column(db.String(80), nullable=False)
+    user_display_name = db.Column(db.String(255))
+    timestamp = db.Column(db.Integer, nullable=False)
+    ip_address = db.Column(db.String(50))
+    notes = db.Column(db.Text)
 
 UPLOAD_FOLDER = 'uploads'
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
 
-# ============================================================
-# CASE MANAGEMENT STORE (In-memory, demo)
-# ============================================================
-# Stores FIRs and linked evidence by case number
-CASE_STORE = {
-    "CR-2026-001": {
-        "case_number": "CR-2026-001",
-        "title": "State vs. Unknown (Mall Robbery)",
-        "incident_type": "Robbery",
-        "description": "Armed robbery at mall gate. Suspect used a knife to snatch cash. Two witnesses present.",
-        "location": "Ryme City Mall, Gate 3, Sector 14",
-        "incident_date": "2026-03-15",
-        "complainant": "Rajesh Sharma",
-        "accused": "Unknown (Male, 5'8\")",
-        "investigating_officer": "Officer Arjun Mehta (OFC-4821)",
-        "fir_number": "FIR/2026/RC/0421",
-        "status": "Investigation Underway",
-        "created_at": int(time.time()) - 86400,
-        "created_by": "officer_vault",
-        "evidence_list": [
-            {
-                "evidence_id": "EV-001",
-                "type": "photo",
-                "description": "CCTV grab of accused at Gate 3",
-                "submitted_by": "officer_vault",
-                "submitted_at": int(time.time()) - 82000,
-                "sha256": "sh8291...331",
-                "forensic_result": {"scene_classification": "Weapon Recovery Scene", "severity": "Critical", "detected_elements": ["Weapon / Dangerous Object"], "applicable_sections": ["BNS 309 (Robbery)", "BNS 115 (Hurt)"]}
-            }
-        ]
-    },
-    "CR-2026-002": {
-        "case_number": "CR-2026-002",
-        "title": "Cyber Fraud (Phishing)",
-        "incident_type": "Cheating",
-        "description": "Complainant duped of 50,000 INR through a deceptive website link for job offer.",
-        "location": "Online / Cyber Cell",
-        "incident_date": "2026-03-20",
-        "complainant": "Sneha Roy",
-        "accused": "Unknown Domain (Phish-Job-Portal.tk)",
-        "investigating_officer": "Officer Arjun Mehta (OFC-4821)",
-        "fir_number": "FIR/2026/CYB/1102",
-        "status": "FIR Registered",
-        "created_at": int(time.time()) - 3600 * 24,
-        "created_by": "officer_vault",
-        "evidence_list": [
-            {
-                "evidence_id": "EV-002",
-                "type": "document",
-                "description": "Deceptive Email Screenshot",
-                "submitted_by": "officer_vault",
-                "submitted_at": int(time.time()) - 3600,
-                "sha256": "df0921...882",
-                "forensic_result": {"trust_label": "Valid", "metadata_status": "Integrity Check Pass", "applicable_sections": ["BNS 318 (Cheating)", "IT Act 66D"]}
-            }
-        ]
-    },
-    "CR-2026-003": {
-        "case_number": "CR-2026-003",
-        "title": "Domestic Conflict (Assault)",
-        "incident_type": "Assault",
-        "description": "Physical altercation resulting in minor injuries. Evidence includes medical report.",
-        "location": "Residency Park, Apartment 4B",
-        "incident_date": "2026-03-25",
-        "complainant": "Vikas Gupta",
-        "accused": "Rohit Verma",
-        "investigating_officer": "Officer Arjun Mehta (OFC-4821)",
-        "fir_number": "FIR/2026/RC/0551",
-        "status": "Under Investigation",
-        "created_at": int(time.time()) - 3600 * 12,
-        "created_by": "officer_vault",
-        "case_diary": [
-            {"date": "2026-03-25", "time": "10:00", "location": "Apartment 4B", "findings": "Initial response. Complainant was visibly distressed. Collected medical first-aid kit.", "officer": "Arjun Mehta"}
-        ],
-        "final_judgment": None,
-        "evidence_list": []
-    }
-}
-
-# ============================================================
-# RBAC: DEMO USER DATABASE & SESSION STORE
-# ============================================================
-
-def hash_pw(pw):
-    return hashlib.sha256(pw.encode()).hexdigest()
-
 DEMO_USERS = {
     "officer_vault": {
-        "password_hash": hash_pw("secure2026"),
+        "password": "secure2026",
         "role": "officer",
         "display_name": "Officer Arjun Mehta",
         "badge": "OFC-4821",
@@ -184,7 +157,7 @@ DEMO_USERS = {
         }
     },
     "forensic_lab": {
-        "password_hash": hash_pw("secure2026"),
+        "password": "secure2026",
         "role": "forensic",
         "display_name": "Dr. Priya Sharma",
         "badge": "FSL-0092",
@@ -203,7 +176,7 @@ DEMO_USERS = {
         }
     },
     "honorable_justice": {
-        "password_hash": hash_pw("secure2026"),
+        "password": "secure2026",
         "role": "judge",
         "display_name": "Hon. Justice R.K. Banerjee",
         "badge": "HC-DEL-1147",
@@ -220,7 +193,7 @@ DEMO_USERS = {
         }
     },
     "citizen_view": {
-        "password_hash": hash_pw("secure2026"),
+        "password": "secure2026",
         "role": "public",
         "display_name": "Citizen Portal",
         "badge": "PUB-ACCESS",
@@ -237,7 +210,7 @@ DEMO_USERS = {
         }
     },
     "dev_support": {
-        "password_hash": hash_pw("secure2026"),
+        "password": "secure2026",
         "role": "developer",
         "display_name": "SysAdmin // DevOps",
         "badge": "DEV-ROOT-01",
@@ -255,16 +228,54 @@ DEMO_USERS = {
     }
 }
 
-# Create DB tables and bootstrap with demo users
+def add_audit_log(level, module, event, username=None):
+    from flask import has_request_context
+    
+    ip_address = None
+    if has_request_context():
+        ip_address = request.remote_addr if hasattr(request, 'remote_addr') else None
+    
+    log = AuditLog(
+        timestamp=int(time.time()),
+        level=level,
+        module=module,
+        event=event,
+        username=username,
+        ip_address=ip_address
+    )
+    db.session.add(log)
+    db.session.commit()
+
+def add_chain_of_custody(evidence_id, case_number, action, username, display_name=None, notes=None):
+    from flask import has_request_context
+    
+    ip_address = None
+    if has_request_context():
+        ip_address = request.remote_addr if hasattr(request, 'remote_addr') else None
+    
+    coc = ChainOfCustody(
+        evidence_id=evidence_id,
+        case_number=case_number,
+        action=action,
+        username=username,
+        user_display_name=display_name,
+        timestamp=int(time.time()),
+        ip_address=ip_address,
+        notes=notes
+    )
+    db.session.add(coc)
+    db.session.commit()
+
 def bootstrap_db():
     with app.app_context():
         db.create_all()
         if not User.query.first():
             print("⚓ Bootstrapping database with demo accounts...")
             for uname, udata in DEMO_USERS.items():
+                pw_hash = bcrypt.generate_password_hash(udata['password']).decode('utf-8')
                 new_user = User(
                     username=uname,
-                    password_hash=udata['password_hash'],
+                    password_hash=pw_hash,
                     role=udata['role'],
                     display_name=udata['display_name'],
                     badge=udata['badge'],
@@ -272,15 +283,50 @@ def bootstrap_db():
                     permissions_json=json.dumps(udata['permissions'])
                 )
                 db.session.add(new_user)
+            
+            demo_cases = [
+                {
+                    "case_number": "CR-2026-001",
+                    "title": "State vs. Unknown (Mall Robbery)",
+                    "incident_type": "Robbery",
+                    "description": "Armed robbery at mall gate. Suspect used a knife to snatch cash. Two witnesses present.",
+                    "location": "Ryme City Mall, Gate 3, Sector 14",
+                    "incident_date": "2026-03-15",
+                    "complainant": "Rajesh Sharma",
+                    "accused": "Unknown (Male, 5'8\")",
+                    "investigating_officer": "Officer Arjun Mehta (OFC-4821)",
+                    "fir_number": "FIR/2026/RC/0421",
+                    "status": "Investigation Underway",
+                    "created_at": int(time.time()) - 86400,
+                    "created_by": "officer_vault"
+                },
+                {
+                    "case_number": "CR-2026-002",
+                    "title": "Cyber Fraud (Phishing)",
+                    "incident_type": "Cheating",
+                    "description": "Complainant duped of 50,000 INR through a deceptive website link for job offer.",
+                    "location": "Online / Cyber Cell",
+                    "incident_date": "2026-03-20",
+                    "complainant": "Sneha Roy",
+                    "accused": "Unknown Domain (Phish-Job-Portal.tk)",
+                    "investigating_officer": "Officer Arjun Mehta (OFC-4821)",
+                    "fir_number": "FIR/2026/CYB/1102",
+                    "status": "FIR Registered",
+                    "created_at": int(time.time()) - 3600 * 24,
+                    "created_by": "officer_vault"
+                }
+            ]
+            
+            for case_data in demo_cases:
+                new_case = Case(**case_data)
+                db.session.add(new_case)
+            
             db.session.commit()
+            add_audit_log("INFO", "DB", "Database bootstrapped with demo data")
             print("✅ Database ready.")
 
 bootstrap_db()
 
-# In-memory session store (demo only - real world would use Redis/Signed JWTs)
-ACTIVE_SESSIONS = {}
-
-# In-memory stores for Feedback and System Events (Non-judicial metadata)
 FEEDBACK_STORE = [
     {"id": "FB-001", "role": "judge", "user": "Banerjee", "text": "The summaries are excellent, can we add multi-case comparison?", "timestamp": int(time.time()) - 172800},
     {"id": "FB-002", "role": "citizen", "user": "Sneha", "text": "Very helpful for understanding FIR procedures.", "timestamp": int(time.time()) - 86400}
@@ -292,28 +338,32 @@ SYSTEM_EVENTS = [
 ]
 
 def require_role(*allowed_roles):
-    """Decorator to restrict endpoint access by role."""
     def decorator(f):
         @wraps(f)
+        @jwt_required()
         def decorated(*args, **kwargs):
-            # Optional check if role is 'anonymous'
             if 'anonymous' in allowed_roles:
                 return f(*args, **kwargs)
-                
-            token = request.headers.get('X-Auth-Token', '')
-            if not token or token not in ACTIVE_SESSIONS:
-                return jsonify({"error": "Authentication required. Please login."}), 401
-            session = ACTIVE_SESSIONS[token]
-            if session['role'] not in allowed_roles:
-                return jsonify({"error": f"Access denied. Required role: {', '.join(allowed_roles)}. Your role: {session['role']}."}), 403
-            request.current_user = session
+            
+            username = get_jwt_identity()
+            user = User.query.filter_by(username=username).first()
+            if not user:
+                return jsonify({"error": "User not found"}), 404
+            
+            if user.role not in allowed_roles:
+                return jsonify({"error": f"Access denied. Required role: {', '.join(allowed_roles)}. Your role: {user.role}."}), 403
+            
+            request.current_user = {
+                "username": user.username,
+                "role": user.role,
+                "display_name": user.display_name,
+                "badge": user.badge,
+                "clearance": user.clearance,
+                "permissions": user.get_permissions()
+            }
             return f(*args, **kwargs)
         return decorated
     return decorator
-
-# ============================================================
-# AUTH ENDPOINTS
-# ============================================================
 
 @app.route('/api/auth/login', methods=['POST'])
 def login():
@@ -324,63 +374,45 @@ def login():
     if not username or not password:
         return jsonify({"error": "Username and password are required."}), 400
 
-    # 1. Try modern SQL Database User first
-    user_db = User.query.filter_by(username=username).first()
+    user = User.query.filter_by(username=username).first()
+    if user and bcrypt.check_password_hash(user.password_hash, password):
+        access_token = create_access_token(identity=username)
+        add_audit_log("INFO", "AUTH", f"Identity verified: {username} ({user.role})", username)
+        return jsonify({
+            "status": "authenticated",
+            "token": access_token,
+            "username": user.username,
+            "role": user.role,
+            "display_name": user.display_name,
+            "badge": user.badge,
+            "clearance": user.clearance,
+            "permissions": user.get_permissions(),
+            "login_time": int(time.time())
+        })
     
-    if user_db and user_db.password_hash == hash_pw(password):
-        user_role = user_db.role
-        display_name = user_db.display_name
-        badge = user_db.badge
-        clearance = user_db.clearance
-        permissions = user_db.get_permissions()
-    # 2. Fallback to static DEMO_USERS for legacy support
-    elif username in DEMO_USERS and DEMO_USERS[username]['password_hash'] == hash_pw(password):
-        u = DEMO_USERS[username]
-        user_role = u['role']
-        display_name = u['display_name']
-        badge = u['badge']
-        clearance = u['clearance']
-        permissions = u['permissions']
-    else:
-        return jsonify({"error": "Invalid credentials. Identity verification failure."}), 401
-
-    token = secrets.token_hex(32)
-    session_data = {
-        "username": username,
-        "role": user_role,
-        "display_name": display_name,
-        "badge": badge,
-        "clearance": clearance,
-        "permissions": permissions,
-        "login_time": int(time.time()),
-        "auth_engine": "SQL-Vault" if user_db else "Legacy-Static"
-    }
-    ACTIVE_SESSIONS[token] = session_data
-    add_log("INFO", "AUTH", f"Identity verified: {username} ({user_role})")
-
-    return jsonify({
-        "status": "authenticated",
-        "token": token,
-        **session_data
-    })
+    return jsonify({"error": "Invalid credentials. Identity verification failure."}), 401
 
 @app.route('/api/auth/me', methods=['GET'])
+@jwt_required()
 def auth_me():
-    token = request.headers.get('X-Auth-Token', '')
-    if not token or token not in ACTIVE_SESSIONS:
+    username = get_jwt_identity()
+    user = User.query.filter_by(username=username).first()
+    if not user:
         return jsonify({"error": "Not authenticated"}), 401
-    return jsonify(ACTIVE_SESSIONS[token])
+    return jsonify({
+        "username": user.username,
+        "role": user.role,
+        "display_name": user.display_name,
+        "badge": user.badge,
+        "clearance": user.clearance,
+        "permissions": user.get_permissions()
+    })
 
 @app.route('/api/auth/logout', methods=['POST'])
+@jwt_required()
 def logout():
-    token = request.headers.get('X-Auth-Token', '')
-    if token in ACTIVE_SESSIONS:
-        del ACTIVE_SESSIONS[token]
+    add_audit_log("INFO", "AUTH", "User logged out", get_jwt_identity())
     return jsonify({"status": "logged_out"})
-
-# ============================================================
-# HEALTH CHECK (Public)
-# ============================================================
 
 @app.route('/health', methods=['GET'])
 def health():
@@ -395,36 +427,6 @@ def health():
         }
     })
 
-# ============================================================
-# SYSTEM HEALTH (Developer Only)
-# ============================================================
-
-# ============================================================
-# SYSTEM EVENT LOGGING (Developer Audit)
-# ============================================================
-SYSTEM_LOGS = []
-
-def add_log(level, module, event):
-    log = {
-        "time": time.strftime('%H:%M:%S'),
-        "level": level,
-        "module": module,
-        "event": event
-    }
-    SYSTEM_LOGS.insert(0, log)
-    if len(SYSTEM_LOGS) > 100:
-        SYSTEM_LOGS.pop()
-
-# Initial logs
-add_log("INFO", "CORE", "Legal Vault Engine initialized successfully.")
-add_log("INFO", "DB", "SQL-Alchemy bound to vault.db")
-
-# Combined System Health & Event Logging moved to Developer section below
-
-# ============================================================
-# MODULE C: FORENSIC EVIDENCE ANALYSIS (Officer + Forensic)
-# ============================================================
-
 @app.route('/analyze', methods=['POST'])
 @require_role('officer', 'forensic', 'judge')
 def analyze_evidence():
@@ -435,14 +437,16 @@ def analyze_evidence():
     if file.filename == '':
         return jsonify({"error": "No selected file"}), 400
 
-    evidence_type = request.form.get('evidence_type', 'document')  # 'photo' or 'document'
+    evidence_type = request.form.get('evidence_type', 'document')
 
     if file:
-        filepath = os.path.join(UPLOAD_FOLDER, file.filename)
-        file.save(filepath)
-
+        # Use separate temporary folder for /analyze to avoid overwriting real evidence!
+        temp_dir = tempfile.mkdtemp(prefix="analyze_")
         try:
-            # Route to appropriate analysis pipeline
+            safe_filename = re.sub(r'[^\w\d_\-.]', '_', file.filename)
+            filepath = os.path.join(temp_dir, safe_filename)
+            file.save(filepath)
+
             if evidence_type == 'photo':
                 ai_report = ai_engine.analyze_photo_evidence(filepath)
             else:
@@ -450,6 +454,8 @@ def analyze_evidence():
             
             ipfs_hash = ai_engine.upload_to_ipfs(filepath)
             file_hash = ai_engine.compute_sha256(filepath)
+
+            add_audit_log("INFO", "FORENSICS", f"Evidence analyzed: {file.filename}", request.current_user['username'])
 
             return jsonify({
                 "filename": file.filename,
@@ -460,16 +466,16 @@ def analyze_evidence():
                 "sha256": file_hash,
                 "measurements": request.form.get('measurements'),
                 "physical_objects": request.form.get('physical_objects'),
-                "branch_of": request.form.get('branch_of'), # Linked to a previous evidence_id if correction
+                "branch_of": request.form.get('branch_of'),
                 "timestamp": int(time.time()),
                 "submitted_by": request.current_user['username']
             })
         except Exception as e:
+            add_audit_log("ERROR", "FORENSICS", f"Analysis failed: {str(e)}", request.current_user['username'])
             return jsonify({"error": str(e)}), 500
-
-# ============================================================
-# MODULE D: OCR SCAN (Officer + Forensic)
-# ============================================================
+        finally:
+            # Clean up temporary directory
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
 @app.route('/api/officer/ocr-scan', methods=['POST'])
 @require_role('officer', 'forensic')
@@ -490,6 +496,8 @@ def officer_ocr_scan():
         verification = ai_engine.verify_ocr_content(extracted_text)
         sha256 = ai_engine.compute_sha256(filepath)
         
+        add_audit_log("INFO", "OCR", f"OCR scan completed: {file.filename}", request.current_user['username'])
+        
         return jsonify({
             "filename": file.filename,
             "sha256": sha256,
@@ -502,11 +510,8 @@ def officer_ocr_scan():
             "scanned_by": request.current_user['username']
         })
     except Exception as e:
+        add_audit_log("ERROR", "OCR", f"OCR failed: {str(e)}", request.current_user['username'])
         return jsonify({"error": str(e)}), 500
-
-# ============================================================
-# MODULE A: JUDICIAL SUMMARIZER (Judge Only)
-# ============================================================
 
 @app.route('/api/judicial/summarize', methods=['POST'])
 @require_role('judge')
@@ -525,8 +530,10 @@ def judicial_summarize():
             if not text.strip():
                 return jsonify({"error": "The uploaded file is empty or unreadable."}), 400
             report = ai_engine.summarize_case(text, file.filename)
+            add_audit_log("INFO", "JUDICIAL", f"Case summarized: {file.filename}", request.current_user['username'])
             return jsonify(report)
         except Exception as e:
+            add_audit_log("ERROR", "JUDICIAL", f"Summarization failed: {str(e)}", request.current_user['username'])
             return jsonify({"error": str(e)}), 500
     
     elif request.is_json:
@@ -537,15 +544,13 @@ def judicial_summarize():
             return jsonify({"error": "No text provided for summarization."}), 400
         try:
             report = ai_engine.summarize_case(text, filename)
+            add_audit_log("INFO", "JUDICIAL", f"Case summarized: {filename}", request.current_user['username'])
             return jsonify(report)
         except Exception as e:
+            add_audit_log("ERROR", "JUDICIAL", f"Summarization failed: {str(e)}", request.current_user['username'])
             return jsonify({"error": str(e)}), 500
     else:
         return jsonify({"error": "Please provide either a file upload or JSON body with 'text' field."}), 400
-
-# ============================================================
-# MODULE B: CITIZEN LEGAL NAVIGATOR (Public + Judge)
-# ============================================================
 
 @app.route('/api/citizen/navigate', methods=['POST'])
 @require_role('public', 'judge', 'officer', 'forensic', 'developer')
@@ -565,39 +570,34 @@ def citizen_navigate():
     try:
         result = ai_engine.navigate_legal_query(query)
         result["query_received"] = query
+        add_audit_log("INFO", "NAVIGATOR", f"Legal query: {query[:50]}...", request.current_user['username'] if hasattr(request, 'current_user') else None)
         return jsonify(result)
     except Exception as e:
+        add_audit_log("ERROR", "NAVIGATOR", f"Query failed: {str(e)}", request.current_user['username'] if hasattr(request, 'current_user') else None)
         return jsonify({"error": str(e)}), 500
-
-
-# ============================================================
-# CASE MANAGEMENT ENDPOINTS
-# ============================================================
 
 @app.route('/api/cases', methods=['GET'])
 @require_role('officer', 'forensic', 'judge', 'developer')
 def get_all_cases():
-    """Return a summary list of all cases."""
-    cases = []
-    for cn, c in CASE_STORE.items():
-        cases.append({
-            "case_number": c['case_number'],
-            "title": c['title'],
-            "incident_type": c['incident_type'],
-            "status": c['status'],
-            "fir_number": c['fir_number'],
-            "created_at": c['created_at'],
-            "evidence_count": len(c.get('evidence_list', []))
+    cases = Case.query.all()
+    case_list = []
+    for case in cases:
+        evidence_count = Evidence.query.filter_by(case_number=case.case_number).count()
+        case_list.append({
+            "case_number": case.case_number,
+            "title": case.title,
+            "incident_type": case.incident_type,
+            "status": case.status,
+            "fir_number": case.fir_number,
+            "created_at": case.created_at,
+            "evidence_count": evidence_count
         })
-    # Sort newest first
-    cases.sort(key=lambda x: x['created_at'], reverse=True)
-    return jsonify(cases)
-
+    case_list.sort(key=lambda x: x['created_at'], reverse=True)
+    return jsonify(case_list)
 
 @app.route('/api/cases/create', methods=['POST'])
 @require_role('officer')
 def create_case():
-    """Officer creates a new FIR / Case."""
     data = request.get_json()
     if not data:
         return jsonify({"error": "Request body required."}), 400
@@ -607,49 +607,116 @@ def create_case():
         if not data.get(field):
             return jsonify({"error": f"'{field}' is required."}), 400
     
-    # Generate unique case number
     year = time.strftime('%Y')
-    count = len([k for k in CASE_STORE if k.startswith(f'CR-{year}')]) + 1
+    count = Case.query.filter(Case.case_number.startswith(f'CR-{year}')).count() + 1
     case_number = f"CR-{year}-{str(count).zfill(3)}"
     
-    case = {
-        "case_number": case_number,
-        "title": data['title'],
-        "incident_type": data['incident_type'],
-        "description": data['description'],
-        "location": data['location'],
-        "incident_date": data['incident_date'],
-        "complainant": data['complainant'],
-        "accused": data.get('accused', 'Unknown'),
-        "fir_number": f"FIR/{year}/RC/{str(random.randint(1000,9999))}",
-        "investigating_officer": request.current_user['display_name'] + ' (' + request.current_user['badge'] + ')',
-        "status": "FIR Registered",
-        "created_at": int(time.time()),
-        "created_by": request.current_user['username'],
+    new_case = Case(
+        case_number=case_number,
+        title=data['title'],
+        incident_type=data['incident_type'],
+        description=data['description'],
+        location=data['location'],
+        incident_date=data['incident_date'],
+        complainant=data['complainant'],
+        accused=data.get('accused', 'Unknown'),
+        fir_number=f"FIR/{year}/RC/{str(random.randint(1000,9999))}",
+        investigating_officer=f"{request.current_user['display_name']} ({request.current_user['badge']})",
+        status="FIR Registered",
+        created_at=int(time.time()),
+        created_by=request.current_user['username']
+    )
+    
+    db.session.add(new_case)
+    db.session.commit()
+    add_audit_log("INFO", "CASE", f"New FIR Registered: {case_number}", request.current_user['username'])
+    
+    return jsonify({"status": "created", "case": {
+        "case_number": new_case.case_number,
+        "title": new_case.title,
+        "incident_type": new_case.incident_type,
+        "description": new_case.description,
+        "location": new_case.location,
+        "incident_date": new_case.incident_date,
+        "complainant": new_case.complainant,
+        "accused": new_case.accused,
+        "fir_number": new_case.fir_number,
+        "investigating_officer": new_case.investigating_officer,
+        "status": new_case.status,
+        "created_at": new_case.created_at,
+        "created_by": new_case.created_by,
         "evidence_list": [],
         "case_diary": []
-    }
-    CASE_STORE[case_number] = case
-    add_log("INFO", "CASE", f"New FIR Registered: {case_number} by {request.current_user['username']}")
-    print(f"[CASE] Created {case_number} by {request.current_user['username']}")
-    return jsonify({"status": "created", "case": case}), 201
-
+    }}), 201
 
 @app.route('/api/cases/<case_number>', methods=['GET'])
 @require_role('officer', 'forensic', 'judge', 'developer')
 def get_case(case_number):
-    """Get full case details by case number."""
-    case = CASE_STORE.get(case_number)
+    case = Case.query.filter_by(case_number=case_number).first()
     if not case:
         return jsonify({"error": f"Case '{case_number}' not found."}), 404
-    return jsonify(case)
-
+    
+    evidence_list = Evidence.query.filter_by(case_number=case_number).all()
+    evidence_data = []
+    for ev in evidence_list:
+        coc_logs = ChainOfCustody.query.filter_by(
+            case_number=case_number,
+            evidence_id=ev.evidence_id
+        ).order_by(ChainOfCustody.timestamp.desc()).all()
+        
+        coc_data = []
+        for coc in coc_logs:
+            coc_data.append({
+                "id": coc.id,
+                "action": coc.action,
+                "username": coc.username,
+                "user_display_name": coc.user_display_name,
+                "timestamp": coc.timestamp,
+                "ip_address": coc.ip_address,
+                "notes": coc.notes
+            })
+        
+        evidence_data.append({
+            "evidence_id": ev.evidence_id,
+            "filename": ev.filename,
+            "type": ev.type,
+            "description": ev.description,
+            "submitted_by": ev.submitted_by,
+            "submitted_by_name": ev.submitted_by_name,
+            "submitted_at": ev.submitted_at,
+            "sha256": ev.sha256,
+            "ipfs_hash": ev.ipfs_hash,
+            "forensic_result": ev.get_forensic_result(),
+            "measurements": ev.measurements,
+            "physical_objects": ev.physical_objects,
+            "branch_of": ev.branch_of,
+            "relevance_score": ev.relevance_score,
+            "chain_of_custody": coc_data
+        })
+    
+    return jsonify({
+        "case_number": case.case_number,
+        "title": case.title,
+        "incident_type": case.incident_type,
+        "description": case.description,
+        "location": case.location,
+        "incident_date": case.incident_date,
+        "complainant": case.complainant,
+        "accused": case.accused,
+        "fir_number": case.fir_number,
+        "investigating_officer": case.investigating_officer,
+        "status": case.status,
+        "created_at": case.created_at,
+        "created_by": case.created_by,
+        "evidence_list": evidence_data,
+        "case_diary": case.get_case_diary(),
+        "final_judgment": case.get_final_judgment()
+    })
 
 @app.route('/api/cases/<case_number>/evidence', methods=['POST'])
 @require_role('officer', 'forensic')
 def attach_case_evidence(case_number):
-    """Officer or Forensic analyst attaches evidence (with file) to an existing case."""
-    case = CASE_STORE.get(case_number)
+    case = Case.query.filter_by(case_number=case_number).first()
     if not case:
         return jsonify({"error": f"Case '{case_number}' not found."}), 404
     
@@ -663,7 +730,10 @@ def attach_case_evidence(case_number):
     if file.filename == '':
         return jsonify({"error": "No file selected."}), 400
     
-    filepath = os.path.join(UPLOAD_FOLDER, file.filename)
+    # Use unique filename to avoid overwriting
+    safe_filename = re.sub(r'[^\w\d_\-.]', '_', file.filename)
+    unique_name = f"{secrets.token_hex(8)}_{safe_filename}"
+    filepath = os.path.join(UPLOAD_FOLDER, unique_name)
     file.save(filepath)
     
     try:
@@ -675,9 +745,49 @@ def attach_case_evidence(case_number):
         sha256 = ai_engine.compute_sha256(filepath)
         ipfs_hash = ai_engine.upload_to_ipfs(filepath)
         
-        ev_count = len(case['evidence_list']) + 1
-        evidence_item = {
-            "evidence_id": f"EV-{str(ev_count).zfill(3)}",
+        case_words = set(case.description.lower().split())
+        evidence_words = set(description.lower().split())
+        intersection = case_words & evidence_words
+        union = case_words | evidence_words
+        relevance_score = round((len(intersection) / len(union)) * 100, 1) if union else 0.0
+        
+        ev_count = Evidence.query.filter_by(case_number=case_number).count() + 1
+        evidence_id = f"EV-{str(ev_count).zfill(3)}"
+        
+        new_evidence = Evidence(
+            evidence_id=evidence_id,
+            case_number=case_number,
+            filename=file.filename,
+            type=evidence_type,
+            description=description,
+            sha256=sha256,
+            ipfs_hash=ipfs_hash,
+            forensic_result_json=json.dumps(forensic_result),
+            submitted_by=request.current_user['username'],
+            submitted_by_name=request.current_user['display_name'],
+            submitted_at=int(time.time()),
+            measurements=request.form.get('measurements'),
+            physical_objects=request.form.get('physical_objects'),
+            branch_of=request.form.get('branch_of'),
+            relevance_score=relevance_score
+        )
+        
+        db.session.add(new_evidence)
+        case.status = 'Under Investigation'
+        db.session.commit()
+        
+        add_audit_log("INFO", "STORAGE", f"Asset {evidence_id} anchored to {case_number}", request.current_user['username'])
+        add_chain_of_custody(
+            evidence_id=evidence_id,
+            case_number=case_number,
+            action="UPLOADED",
+            username=request.current_user['username'],
+            display_name=request.current_user['display_name'],
+            notes=f"Evidence attached to case {case_number}"
+        )
+        
+        return jsonify({"status": "attached", "evidence": {
+            "evidence_id": evidence_id,
             "filename": file.filename,
             "type": evidence_type,
             "description": description,
@@ -690,89 +800,74 @@ def attach_case_evidence(case_number):
             "measurements": request.form.get('measurements'),
             "physical_objects": request.form.get('physical_objects'),
             "branch_of": request.form.get('branch_of')
-        }
-        case['evidence_list'].append(evidence_item)
-        case['status'] = 'Under Investigation'
-        add_log("INFO", "STORAGE", f"Asset {evidence_item['evidence_id']} anchored to {case_number} (IPFS: {ipfs_hash[:8]}...)")
-        print(f"[CASE] Evidence {evidence_item['evidence_id']} attached to {case_number}")
-        return jsonify({"status": "attached", "evidence": evidence_item}), 201
+        }}), 201
     except Exception as e:
+        add_audit_log("ERROR", "STORAGE", f"Evidence attachment failed: {str(e)}", request.current_user['username'])
         return jsonify({"error": str(e)}), 500
-
 
 @app.route('/api/cases/<case_number>/analyze', methods=['GET'])
 @require_role('judge')
 def judicial_case_analysis(case_number):
-    """Judge requests full AI case intelligence report for a case number."""
-    case = CASE_STORE.get(case_number)
+    case = Case.query.filter_by(case_number=case_number).first()
     if not case:
         return jsonify({"error": f"Case '{case_number}' not found."}), 404
     
-    evidence_list = case.get('evidence_list', [])
+    evidence_list = Evidence.query.filter_by(case_number=case_number).all()
     
-    # --- Collect all forensic sections and severities ---
     all_sections = []
     all_elements = []
     severity_scores = []
     severity_map_num = {"Critical": 4, "High": 3, "Moderate": 2, "Standard": 1, "Unknown": 0}
     
     for ev in evidence_list:
-        fr = ev.get('forensic_result', {})
-        # Photo evidence
+        fr = ev.get_forensic_result()
         sections = fr.get('applicable_sections', [])
         elements = fr.get('detected_elements', [])
         severity = fr.get('severity', 'Unknown')
-        # Document evidence trust
-        id_score = fr.get('identity_verification', {}).get('identity_score_pct', 0) if isinstance(fr.get('identity_verification'), dict) else 0
         
         all_sections.extend(sections)
         all_elements.extend(elements)
         if severity in severity_map_num:
             severity_scores.append(severity_map_num[severity])
     
-    # --- BNS/IPC section lookup from incident description ---
-    full_text = f"""{case['title']} {case['description']} {case['incident_type']} {' '.join(all_elements)}"""
+    full_text = f"""{case.title} {case.description} {case.incident_type} {' '.join(all_elements)}"""
     try:
         nlp_result = ai_engine.navigate_legal_query(full_text)
     except Exception:
         nlp_result = {"status": "no_match"}
     
-    # --- Crime probability based on evidence strength ---
-    evidence_score = min(len(evidence_list) * 20, 60)  # Each piece adds 20%, cap at 60%
-    section_score = min(len(set(all_sections)) * 5, 20)  # Each unique section adds 5%
-    severity_avg = (sum(severity_scores) / len(severity_scores) / 4 * 20) if severity_scores else 0  # 20% from severity
+    evidence_score = min(len(evidence_list) * 20, 60)
+    section_score = min(len(set(all_sections)) * 5, 20)
+    severity_avg = (sum(severity_scores) / len(severity_scores) / 4 * 20) if severity_scores else 0
     crime_probability = round(min(evidence_score + section_score + severity_avg, 97), 1)
     
-    # --- Top BNS/IPC matches ---
     applicable_laws = []
-    if nlp_result.get('status') == 'match_found':
+    if nlp_result.get('status') == 'match_found' and 'primary_match' in nlp_result:
         pm = nlp_result['primary_match']
         applicable_laws.append({
             "title": pm['title'],
-            "bns_section": pm['bns_section'],
-            "ipc_section": pm['ipc_section'],
-            "punishment": pm['punishment'],
-            "score": pm['relevance_score'],
+            "bns_section": pm.get('bns_section', '—'),
+            "ipc_section": pm.get('ipc_section', '—'),
+            "punishment": pm.get('punishment', 'As per court discretion'),
+            "score": pm.get('relevance_score', 0),
             "type": "Primary Match"
         })
         for rs in nlp_result.get('related_sections', [])[:4]:
             applicable_laws.append({
                 "title": rs['title'],
-                "bns_section": rs['bns_section'],
-                "ipc_section": rs['ipc_section'],
+                "bns_section": rs.get('bns_section', '—'),
+                "ipc_section": rs.get('ipc_section', '—'),
                 "punishment": "As per court discretion",
                 "score": 0,
                 "type": "Related Section"
             })
     
-    # Add forensic-detected sections
     forensic_laws_seen = set()
     for s in set(all_sections):
         if s not in forensic_laws_seen:
             applicable_laws.append({"title": s, "bns_section": s, "ipc_section": "—", "punishment": "As determined by court", "score": 0, "type": "Forensic Evidence"})
             forensic_laws_seen.add(s)
     
-    # De-duplicate by keeping unique titles
     seen_titles = set()
     unique_laws = []
     for law in applicable_laws:
@@ -780,7 +875,6 @@ def judicial_case_analysis(case_number):
             unique_laws.append(law)
             seen_titles.add(law['title'])
     
-    # --- Probability label ---
     if crime_probability >= 80:
         prob_label = "Very High"
         prob_color = "red"
@@ -798,9 +892,23 @@ def judicial_case_analysis(case_number):
         prob_color = "green"
         recommendation = "Insufficient evidence for charges at this stage. The matter requires further investigation."
     
+    add_audit_log("INFO", "JUDICIAL", f"Case analysis requested: {case_number}", request.current_user['username'])
+    
     report = {
         "case_number": case_number,
-        "case_details": case,
+        "case_details": {
+            "case_number": case.case_number,
+            "title": case.title,
+            "incident_type": case.incident_type,
+            "description": case.description,
+            "location": case.location,
+            "incident_date": case.incident_date,
+            "complainant": case.complainant,
+            "accused": case.accused,
+            "fir_number": case.fir_number,
+            "investigating_officer": case.investigating_officer,
+            "status": case.status
+        },
         "total_evidence": len(evidence_list),
         "crime_probability": crime_probability,
         "probability_label": prob_label,
@@ -815,33 +923,32 @@ def judicial_case_analysis(case_number):
     }
     return jsonify(report)
 
-
-# ============================================================
-# SYSTEM MONITORING: FEEDBACK & EVENTS (Developer Only)
-# ============================================================
-
 @app.route('/api/feedback', methods=['POST'])
-@require_role('officer', 'judge', 'citizen', 'developer', 'anonymous')
+@jwt_required(optional=True)
 def submit_feedback():
     data = request.get_json()
     if not data or 'text' not in data:
         return jsonify({"error": "Feedback text required."}), 400
     
-    # Handle anonymous or logged in
-    user_role = 'anonymous'
-    username = 'Public User'
-    if hasattr(request, 'current_user'):
-        user_role = request.current_user['role']
-        username = request.current_user['username']
-
+    username = None
+    role = 'anonymous'
+    try:
+        username = get_jwt_identity()
+        user = User.query.filter_by(username=username).first()
+        if user:
+            role = user.role
+    except:
+        pass
+    
     fb = {
         "id": f"FB-{str(len(FEEDBACK_STORE) + 1).zfill(3)}",
-        "role": user_role,
-        "user": username,
+        "role": role,
+        "user": username or 'Public User',
         "text": data['text'],
         "timestamp": int(time.time())
     }
     FEEDBACK_STORE.append(fb)
+    add_audit_log("INFO", "FEEDBACK", "Feedback received", username)
     return jsonify({"status": "success", "message": "Feedback submitted to developers.", "feedback": fb})
 
 @app.route('/api/system/feedback', methods=['GET'])
@@ -857,13 +964,10 @@ def get_system_events():
 @app.route('/api/system/health', methods=['GET'])
 @require_role('developer')
 def system_health():
-    """Detailed system telemetry for the Dev Dashboard."""
-    import psutil
     import platform
     
     process = psutil.Process(os.getpid())
     
-    # Calculate real storage usage from uploads directory
     vault_size_bytes = 0
     if os.path.exists(UPLOAD_FOLDER):
         for f in os.listdir(UPLOAD_FOLDER):
@@ -871,10 +975,21 @@ def system_health():
             if os.path.isfile(fp):
                 vault_size_bytes += os.path.getsize(fp)
 
-    # Calculate real-time throughput
     avg_lat = sum(REQUEST_METRICS["latencies"]) / len(REQUEST_METRICS["latencies"]) if REQUEST_METRICS["latencies"] else 0
     duration_min = (time.time() - REQUEST_METRICS["last_reset"]) / 60 or 1
     rpm = int(REQUEST_METRICS["total_calls"] / duration_min)
+
+    audit_logs = AuditLog.query.order_by(AuditLog.timestamp.desc()).limit(50).all()
+    logs_list = []
+    for log in audit_logs:
+        logs_list.append({
+            "time": time.strftime('%H:%M:%S', time.localtime(log.timestamp)),
+            "level": log.level,
+            "module": log.module,
+            "event": log.event,
+            "username": log.username,
+            "ip_address": log.ip_address
+        })
 
     health_data = {
         "status": "online",
@@ -890,9 +1005,9 @@ def system_health():
             "python_version": platform.python_version()
         },
         "stats": {
-            "total_cases": len(CASE_STORE),
-            "pending_analysis": len([c for c in CASE_STORE.values() if not c.get('evidence_list')]),
-            "active_sessions": len(ACTIVE_SESSIONS),
+            "total_cases": Case.query.count(),
+            "pending_analysis": Case.query.filter(Case.status == "FIR Registered").count(),
+            "active_sessions": 0,
             "vault_size_kb": round(vault_size_bytes / 1024, 2)
         },
         "services": {
@@ -903,11 +1018,11 @@ def system_health():
             "oracle_p2p": "synchronized"
         },
         "throughput": {
-            "requests_per_min": rpm if rpm > 0 else random.randint(2, 8), # Initial floor for demo
+            "requests_per_min": rpm if rpm > 0 else random.randint(2, 8),
             "avg_latency_ms": int(avg_lat),
             "neural_token_usage": REQUEST_METRICS["tokens_consumed"]
         },
-        "logs": SYSTEM_LOGS
+        "logs": logs_list
     }
     return jsonify(health_data)
 
@@ -922,45 +1037,30 @@ def simulate_threat():
         "timestamp": int(time.time())
     }
     SYSTEM_EVENTS.insert(0, threat)
+    add_audit_log("CRITICAL", "SECURITY", "Threat simulated", request.current_user['username'])
     return jsonify({"status": "threat_simulated", "event": threat})
-
 
 @app.route('/api/system/maintenance', methods=['POST'])
 @require_role('developer')
 def system_maintenance():
-    """
-    Developer Maintenance Interface.
-    Allows low-level system hygiene without data access.
-    """
     global SYSTEM_EVENTS, FEEDBACK_STORE
     data = request.get_json()
     action = data.get('action')
     
-    # Simulate different maintenance operations
     if action == 'clear_temp':
-        # Logic to clean /uploads folder of old temp files
-        files = os.listdir(UPLOAD_FOLDER)
-        # Check against CASE_STORE to find orphans
-        active_hashes = []
-        for case in CASE_STORE.values():
-            for ev in case.get('evidence_list', []):
-                active_hashes.append(ev.get('sha256'))
-        
-        # In a real app we'd delete orphans here. For demo we simulate:
+        files = os.listdir(UPLOAD_FOLDER) if os.path.exists(UPLOAD_FOLDER) else []
         time.sleep(1)
-        add_log("WARN", "CLEANUP", f"Orphan sanitization: {len(files)} files checked. 0 orphans found.")
+        add_audit_log("WARN", "CLEANUP", f"Orphan sanitization: {len(files)} files checked", request.current_user['username'])
         return jsonify({
             "status": "success",
-            "message": f"Sanitization complete. Analyzed {len(files)} files. 0 orphan records found.",
+            "message": f"Sanitization complete. Analyzed {len(files)} files. 0 orphans found.",
             "timestamp": int(time.time())
         })
     
     elif action == 'db_verify':
-        # Check SQLAlchemy database integrity
         try:
-            with app.app_context():
-                User.query.limit(1).all() # Simple ping
-            add_log("INFO", "DB", "Database integrity verification sequence successful.")
+            User.query.limit(1).all()
+            add_audit_log("INFO", "DB", "Database integrity verified", request.current_user['username'])
             return jsonify({
                 "status": "success",
                 "message": "Database integrity verified. SQLAlchemy 'vault.db' state is healthy.",
@@ -970,7 +1070,7 @@ def system_maintenance():
             return jsonify({"status": "error", "message": f"DB verification failed: {str(e)}"}), 500
             
     elif action == 'rotate_keys':
-        # Logic to invalidate stale tokens
+        add_audit_log("INFO", "SECURITY", "Session keys rotated", request.current_user['username'])
         return jsonify({
             "status": "success", 
             "message": "Session secret keys rotated. All active tokens remain valid for 24h.",
@@ -978,11 +1078,9 @@ def system_maintenance():
         })
     
     elif action == 'mitigate_threats':
-        # Simulated mitigation
         count = len([e for e in SYSTEM_EVENTS if e['level'] == 'Critical'])
-        # Clear critical threats in demo
         SYSTEM_EVENTS = [e for e in SYSTEM_EVENTS if e['level'] != 'Critical']
-        add_log("CRITICAL", "SECURITY", f"Threat Mitigation: {count} critical alerts neutralized.")
+        add_audit_log("CRITICAL", "SECURITY", f"Threat mitigation: {count} alerts neutralized", request.current_user['username'])
         return jsonify({
             "status": "success", 
             "message": f"Mitigation sequence complete. Neutralized {count} critical integrity alerts.",
@@ -991,11 +1089,11 @@ def system_maintenance():
     
     return jsonify({"error": "Invalid maintenance action specified."}), 400
 
-
 @app.route('/api/cases/<case_number>/diary', methods=['POST'])
 @require_role('officer')
 def add_diary_entry(case_number):
-    if case_number not in CASE_STORE:
+    case = Case.query.filter_by(case_number=case_number).first()
+    if not case:
         return jsonify({"error": "Case not found"}), 404
     
     data = request.get_json()
@@ -1008,17 +1106,19 @@ def add_diary_entry(case_number):
         "timestamp": int(time.time())
     }
     
-    if 'case_diary' not in CASE_STORE[case_number]:
-        CASE_STORE[case_number]['case_diary'] = []
+    case_diary = case.get_case_diary()
+    case_diary.append(entry)
+    case.case_diary_json = json.dumps(case_diary)
+    db.session.commit()
     
-    CASE_STORE[case_number]['case_diary'].append(entry)
+    add_audit_log("INFO", "CASE", f"Diary entry added to {case_number}", request.current_user['username'])
     return jsonify({"status": "success", "entry": entry})
-
 
 @app.route('/api/cases/<case_number>/judgment', methods=['POST'])
 @require_role('judge')
 def submit_judgment(case_number):
-    if case_number not in CASE_STORE:
+    case = Case.query.filter_by(case_number=case_number).first()
+    if not case:
         return jsonify({"error": "Case not found"}), 404
     
     data = request.get_json()
@@ -1027,21 +1127,135 @@ def submit_judgment(case_number):
     if not judgment_text:
         return jsonify({"error": "Judgment text is required."}), 400
         
-    CASE_STORE[case_number]['final_judgment'] = {
+    judgment = {
         "text": judgment_text,
         "judge": request.current_user['display_name'],
         "timestamp": int(time.time())
     }
-    CASE_STORE[case_number]['status'] = "Closed / Judgment Delivered"
     
+    case.final_judgment_json = json.dumps(judgment)
+    case.status = "Closed / Judgment Delivered"
+    db.session.commit()
+    
+    add_audit_log("INFO", "CASE", f"Final judgment recorded for {case_number}", request.current_user['username'])
     return jsonify({"status": "success", "message": "Final judgment recorded on ledger."})
 
+@app.route('/api/evidence/<evidence_id>/verify', methods=['POST'])
+@require_role('officer', 'forensic', 'judge', 'developer')
+def verify_evidence(evidence_id):
+    evidence = Evidence.query.filter_by(evidence_id=evidence_id).first()
+    if not evidence:
+        return jsonify({"error": "Evidence not found"}), 404
+    
+    if 'file' not in request.files:
+        return jsonify({"error": "No file provided"}), 400
+    
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"error": "No file selected"}), 400
+    
+    temp_path = os.path.join(UPLOAD_FOLDER, f"verify_{secrets.token_hex(8)}_{file.filename}")
+    file.save(temp_path)
+    
+    try:
+        computed_hash = ai_engine.compute_sha256(temp_path)
+        is_valid = computed_hash == evidence.sha256
+        
+        add_chain_of_custody(
+            evidence_id=evidence_id,
+            case_number=evidence.case_number,
+            action="VERIFIED",
+            username=request.current_user['username'],
+            display_name=request.current_user['display_name'],
+            notes=f"Verification {'PASSED' if is_valid else 'FAILED'}"
+        )
+        
+        os.unlink(temp_path)
+        
+        return jsonify({
+            "evidence_id": evidence_id,
+            "is_valid": is_valid,
+            "stored_hash": evidence.sha256,
+            "computed_hash": computed_hash,
+            "filename": evidence.filename
+        })
+    except Exception as e:
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/cases/<case_number>/evidence/<evidence_id>/coc', methods=['GET'])
+@require_role('officer', 'forensic', 'judge', 'developer')
+def get_chain_of_custody(case_number, evidence_id):
+    coc_logs = ChainOfCustody.query.filter_by(
+        case_number=case_number,
+        evidence_id=evidence_id
+    ).order_by(ChainOfCustody.timestamp.desc()).all()
+    
+    logs_list = []
+    for log in coc_logs:
+        logs_list.append({
+            "id": log.id,
+            "evidence_id": log.evidence_id,
+            "case_number": log.case_number,
+            "action": log.action,
+            "username": log.username,
+            "user_display_name": log.user_display_name,
+            "timestamp": log.timestamp,
+            "ip_address": log.ip_address,
+            "notes": log.notes
+        })
+    return jsonify(logs_list)
+
+@app.route('/api/evidence/relevance', methods=['POST'])
+@require_role('officer', 'forensic', 'judge')
+def check_evidence_relevance():
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "Request body required"}), 400
+    
+    case_description = data.get('case_description', '')
+    evidence_description = data.get('evidence_description', '')
+    
+    if not case_description or not evidence_description:
+        return jsonify({"error": "Both case_description and evidence_description are required"}), 400
+    
+    case_words = set(case_description.lower().split())
+    evidence_words = set(evidence_description.lower().split())
+    intersection = case_words & evidence_words
+    union = case_words | evidence_words
+    
+    relevance_score = round((len(intersection) / len(union)) * 100, 1) if union else 0
+    
+    return jsonify({
+        "relevance_score": relevance_score,
+        "case_keywords": list(case_words),
+        "evidence_keywords": list(evidence_words),
+        "common_keywords": list(intersection)
+    })
+
+@app.route('/api/system/audit-logs', methods=['GET'])
+@require_role('developer')
+def get_audit_logs():
+    audit_logs = AuditLog.query.order_by(AuditLog.timestamp.desc()).limit(100).all()
+    logs_list = []
+    for log in audit_logs:
+        logs_list.append({
+            "id": log.id,
+            "timestamp": log.timestamp,
+            "level": log.level,
+            "module": log.module,
+            "event": log.event,
+            "username": log.username,
+            "ip_address": log.ip_address
+        })
+    return jsonify(logs_list)
 
 if __name__ == '__main__':
     print("\n  === SECURE LEGAL VAULT // RBAC ENGINE ===")
     print("  Demo Credentials (all pw: secure2026):")
     print("    officer_vault   | forensic_lab")
     print("    honorable_justice | citizen_view | dev_support")
+    print("  Features: Persistent Storage, Bcrypt, JWT, Audit Logs")
     print("  =========================================\n")
-    # For local development outside of production gunicorn
     app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)

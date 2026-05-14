@@ -69,8 +69,13 @@ const TimelineItem = ({ title, date, active, completed, icon: Icon }) => (
 
 function App() {
   // Auth state
-  const [currentUser, setCurrentUser] = useState(null);
-  const [authToken, setAuthToken] = useState(null);
+  const [currentUser, setCurrentUser] = useState(() => {
+    const saved = localStorage.getItem('securelock_user');
+    return saved ? JSON.parse(saved) : null;
+  });
+  const [authToken, setAuthToken] = useState(() => {
+    return localStorage.getItem('securelock_token') || null;
+  });
 
   const role = currentUser?.role || null;
   const perms = currentUser?.permissions || {};
@@ -99,6 +104,10 @@ function App() {
   const [feedbackText, setFeedbackText] = useState('');
   const [isSendingFeedback, setIsSendingFeedback] = useState(false);
 
+  const [cases, setCases] = useState([]);
+  const [selectedVerifyCase, setSelectedVerifyCase] = useState(null);
+  const [selectedVerifyEvidence, setSelectedVerifyEvidence] = useState(null);
+
   const handleFeedbackSubmit = async (e) => {
     e.preventDefault();
     if (!feedbackText.trim()) return;
@@ -106,7 +115,7 @@ function App() {
     try {
       const headers = { 'Content-Type': 'application/json' };
       if (authToken) {
-        headers['X-Auth-Token'] = authToken;
+        headers['Authorization'] = `Bearer ${authToken}`;
       }
       
       await axios.post(`${API_AI_URL}/api/feedback`, 
@@ -123,11 +132,13 @@ function App() {
   };
 
   // Auth helper: create axios instance with token
-  const authHeaders = () => authToken ? { 'X-Auth-Token': authToken } : {};
+  const authHeaders = () => authToken ? { 'Authorization': `Bearer ${authToken}` } : {};
 
   const handleLogin = (data) => {
     setAuthToken(data.token);
     setCurrentUser(data);
+    localStorage.setItem('securelock_token', data.token);
+    localStorage.setItem('securelock_user', JSON.stringify(data));
     // Set default tab based on role
     if (data.role === 'judge') setActiveTab('case_intel');
     else if (data.role === 'public') setActiveTab('navigator');
@@ -144,15 +155,39 @@ function App() {
     } catch (e) { }
     setCurrentUser(null);
     setAuthToken(null);
+    localStorage.removeItem('securelock_token');
+    localStorage.removeItem('securelock_user');
     setActiveTab('upload');
     setAnalysis(null);
     setOcrResult(null);
     setVerifyResult(null);
-    setVerifyResult(null);
+  };
+
+  const fetchCases = async () => {
+    try {
+      const res = await axios.get(`${API_AI_URL}/api/cases`, { headers: authHeaders() });
+      setCases(res.data);
+    } catch (err) {
+      if (err.response?.status === 401) handleLogout();
+      console.error("Error fetching cases", err);
+    }
+  };
+
+  const fetchFullCase = async (caseNumber) => {
+    try {
+      const res = await axios.get(`${API_AI_URL}/api/cases/${caseNumber}`, { headers: authHeaders() });
+      setSelectedVerifyCase(res.data);
+    } catch (err) {
+      if (err.response?.status === 401) handleLogout();
+      console.error("Error fetching full case", err);
+    }
   };
 
   useEffect(() => {
-    if (currentUser) fetchEvidence();
+    if (currentUser) {
+      fetchEvidence();
+      if (currentUser.role === 'judge') fetchCases();
+    }
   }, [currentUser]);
 
   const fetchEvidence = async () => {
@@ -300,21 +335,25 @@ function App() {
   };
 
   const runCourtVerification = async () => {
-    if (!verifyFile) return;
+    if (!verifyFile || !selectedVerifyEvidence) return;
     setIsVerifying(true);
     const formData = new FormData();
     formData.append('file', verifyFile);
 
     try {
-      const res = await axios.post(`${API_AI_URL}/analyze`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data', ...authHeaders() }
-      });
-      const fileHash = res.data.sha256;
-      const searchRes = await axios.get(`${API_BLOCKCHAIN_URL}/api/evidence`);
-      const match = searchRes.data.find(e => e.hash.toLowerCase() === fileHash.toLowerCase());
-      setVerifyResult(match ? { status: 'authentic', data: match } : { status: 'tampered' });
+      const res = await axios.post(
+        `${API_AI_URL}/api/evidence/${selectedVerifyEvidence.evidence_id}/verify`,
+        formData,
+        { headers: { ...authHeaders() } }
+      );
+      setVerifyResult(res.data);
     } catch (err) {
+      if (err.response?.status === 401) {
+        handleLogout();
+        return;
+      }
       console.error("Verification error", err);
+      setVerifyResult({ error: err.response?.data?.error || err.message });
     } finally {
       setIsVerifying(false);
     }
@@ -940,110 +979,124 @@ function App() {
                 </div>
                 <div>
                   <h1 className="text-5xl font-black text-white tracking-tighter">Legal <span className="text-purple-400 underline decoration-purple-600/30 decoration-8 underline-offset-4">Admissibility</span> Node</h1>
-                  <p className="text-slate-400 mt-2 text-lg font-medium">Verify forensic integrity via real-time R3 Corda database lookup.</p>
+                  <p className="text-slate-400 mt-2 text-lg font-medium">Select a case and evidence to verify forensic integrity.</p>
                 </div>
               </header>
 
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
-                <div className="glass-card rounded-[3rem] p-12 border-white/5 relative overflow-hidden group">
-                  <div className="absolute top-0 left-0 w-2 h-full bg-purple-600 opacity-20 group-hover:opacity-100 transition-opacity"></div>
-                  <h2 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-10 flex items-center">
-                    <Download className="w-4 h-4 mr-3 text-purple-400" /> Deposition Ingest
-                  </h2>
-
-                  <div className={`border-3 border-dashed rounded-[2.5rem] p-16 text-center transition-all duration-700 cursor-pointer ${verifyFile ? 'border-purple-500/50 bg-purple-500/5' : 'border-white/10 hover:border-purple-500/30 hover:bg-slate-900/50'}`}
-                    onClick={() => document.getElementById('verifyInput').click()}>
-                    <input type="file" id="verifyInput" className="hidden" onChange={handleVerifyFileChange} />
-
-                    <div className={`w-24 h-24 rounded-3xl flex items-center justify-center mx-auto mb-8 transition-all duration-700 ${verifyFile ? 'bg-purple-600 shadow-2xl shadow-purple-500/40' : 'bg-slate-950 ring-1 ring-white/10'}`}>
-                      <Eye className={`w-10 h-10 ${verifyFile ? 'text-white' : 'text-slate-600'}`} />
-                    </div>
-
-                    <h3 className="text-2xl font-black text-slate-200 mb-4">{verifyFile ? verifyFile.name : 'Ingest Presentation File'}</h3>
-                    <p className="text-sm text-slate-500 max-w-xs mx-auto font-medium leading-relaxed">System will perform real-time SHA-256 collision detection against the Corda master ledger.</p>
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-12">
+                {/* Step 1: Select Case */}
+                <div className="space-y-6">
+                  <h2 className="text-xs font-black text-purple-400 uppercase tracking-widest">Step 1: Select Case</h2>
+                  <div className="glass-card rounded-2xl p-6 border-white/5 max-h-[400px] overflow-y-auto space-y-3">
+                    {cases.map((c) => (
+                      <button key={c.case_number} onClick={async () => {
+                        setSelectedVerifyEvidence(null);
+                        setVerifyResult(null);
+                        setVerifyFile(null);
+                        await fetchFullCase(c.case_number);
+                      }} className={`w-full text-left p-4 rounded-xl border transition-all ${selectedVerifyCase?.case_number === c.case_number ? 'border-purple-500 bg-purple-500/10' : 'border-white/5 bg-slate-900/40 hover:border-purple-500/20'}`}>
+                        <span className="text-[10px] font-black text-purple-400 uppercase">{c.case_number}</span>
+                        <p className="text-xs font-bold text-white mt-1">{c.title}</p>
+                        <span className={`mt-2 block w-max px-2 py-0.5 rounded text-[8px] font-black uppercase border ${c.status?.includes('Closed') ? 'text-emerald-400 border-emerald-500/20 bg-emerald-500/10' : 'text-blue-400 border-blue-500/20 bg-blue-500/10'}`}>{c.status}</span>
+                      </button>
+                    ))}
                   </div>
-
-                  {verifyFile && (
-                    <button onClick={runCourtVerification} disabled={isVerifying} className="w-full mt-12 py-6 bg-white text-slate-950 hover:bg-purple-50 rounded-2xl font-black uppercase tracking-[0.2em] shadow-2xl transition-all disabled:opacity-50 active:scale-95 flex items-center justify-center">
-                      {isVerifying ? <Activity className="animate-spin mr-3" /> : <Shield className="mr-3 w-4 h-4" />}
-                      {isVerifying ? "Mining Forensic Comparison..." : "Validate Admissibility"}
-                    </button>
-                  )}
                 </div>
 
-                <div className="flex flex-col justify-center min-h-[500px]">
-                  {!verifyResult && !isVerifying && (
-                    <div className="glass-card rounded-[3rem] p-16 text-center border-dashed group border-white/5">
-                      <Activity className="w-16 h-16 text-slate-800 mx-auto mb-8 animate-pulse" />
-                      <h3 className="text-2xl font-black text-slate-600 mb-4">Awaiting Signal</h3>
-                      <p className="text-sm text-slate-500 max-w-xs mx-auto font-medium">Verification engine requires a presented asset for cryptographic authentication.</p>
-                    </div>
-                  )}
-
-                  {isVerifying && (
-                    <div className="space-y-8">
-                      <div className="h-32 bg-slate-900/50 backdrop-blur-md rounded-3xl animate-pulse ring-1 ring-white/5"></div>
-                      <div className="h-80 bg-slate-900/50 backdrop-blur-md rounded-[3rem] animate-pulse ring-1 ring-white/5"></div>
-                    </div>
-                  )}
-
-                  {verifyResult && (
-                    <div className={`p-12 glass-card rounded-[3.5rem] border-2 animate-in slide-in-from-right duration-700 ${verifyResult.status === 'authentic' ? 'border-green-500/30' : 'border-red-500/30'}`}>
-                      <div className="text-center space-y-10">
-                        {verifyResult.status === 'authentic' ? (
-                          <>
-                            <div className="relative inline-block">
-                              <div className="absolute inset-0 bg-green-500 blur-3xl opacity-20 scale-150 animate-pulse"></div>
-                              <div className="relative w-32 h-32 bg-green-500 rounded-full flex items-center justify-center mx-auto shadow-2xl shadow-green-500/40">
-                                <CheckCircle className="w-16 h-16 text-white" strokeWidth={3} />
-                              </div>
-                            </div>
-
-                            <div className="space-y-2">
-                              <h2 className="text-6xl font-black text-white tracking-tighter">AUTHENTIC</h2>
-                              <p className="text-green-500 font-black uppercase tracking-[0.4em] text-xs">Ledger Consistency Confirmed</p>
-                            </div>
-
-                            <div className="p-8 bg-slate-950/80 rounded-[2rem] border border-white/5 text-left space-y-6 shadow-3xl">
-                              <div className="flex justify-between items-center group">
-                                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Hash Match</span>
-                                <span className="text-cyan-400 font-mono text-xs select-all bg-slate-900 px-3 py-1 rounded-lg border border-white/5">{verifyResult.data.hash.substring(0, 24)}...</span>
-                              </div>
-                              <div className="flex justify-between items-center border-t border-white/5 pt-6">
-                                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Genesis Author</span>
-                                <span className="text-white font-bold text-sm tracking-tight">POLICE_FORENSIC_NODE</span>
-                              </div>
-                            </div>
-
-                            <button
-                              onClick={() => setShowCert(verifyResult.data)}
-                              className="w-full py-5 border-2 border-green-500/50 text-green-400 hover:bg-green-500 hover:text-white rounded-2xl font-black uppercase tracking-[0.2em] transition-all text-xs"
-                            >
-                              Generate Admissibility Certificate
-                            </button>
-                          </>
-                        ) : (
-                          <>
-                            <div className="relative inline-block">
-                              <div className="absolute inset-0 bg-red-500 blur-3xl opacity-20 scale-150 animate-pulse"></div>
-                              <div className="relative w-32 h-32 bg-red-500 rounded-full flex items-center justify-center mx-auto shadow-2xl shadow-red-500/40">
-                                <AlertTriangle className="w-16 h-16 text-white" strokeWidth={3} />
-                              </div>
-                            </div>
-                            <h2 className="text-6xl font-black text-white tracking-tighter">INVALID</h2>
-                            <p className="text-red-500 font-black uppercase tracking-[0.4em] text-xs">Security Protocol Violation</p>
-                            <div className="mt-8 p-8 bg-red-950/20 border border-red-500/20 rounded-[2rem] text-red-100 text-sm leading-relaxed font-medium">
-                              The presented asset has NO matching record on the R3 Corda network.
-                              Admitting this file into evidence would violate cryptographic chain-of-custody rules.
-                            </div>
-                            <button onClick={() => setVerifyResult(null)} className="mt-8 text-slate-500 hover:text-white font-bold text-xs uppercase tracking-widest">
-                              Re-Scan Presented Asset
-                            </button>
-                          </>
-                        )}
+                {/* Step 2: Select Evidence */}
+                <div className="space-y-6">
+                  <h2 className="text-xs font-black text-blue-400 uppercase tracking-widest">Step 2: Select Evidence</h2>
+                  <div className="glass-card rounded-2xl p-6 border-white/5 max-h-[400px] overflow-y-auto space-y-3">
+                    {selectedVerifyCase ? (
+                      selectedVerifyCase.evidence_list?.map((ev) => (
+                        <button key={ev.evidence_id} onClick={() => {
+                          setSelectedVerifyEvidence(ev);
+                          setVerifyResult(null);
+                          setVerifyFile(null);
+                        }} className={`w-full text-left p-4 rounded-xl border transition-all ${selectedVerifyEvidence?.evidence_id === ev.evidence_id ? 'border-blue-500 bg-blue-500/10' : 'border-white/5 bg-slate-900/40 hover:border-blue-500/20'}`}>
+                          <span className="text-[10px] font-black text-blue-400 uppercase">{ev.evidence_id}</span>
+                          <p className="text-xs font-bold text-white mt-1">{ev.description || ev.filename}</p>
+                          <span className={`mt-2 block w-max px-2 py-0.5 rounded text-[8px] font-black uppercase border ${(ev.relevance_score || 0) >= 70 ? 'text-emerald-400 border-emerald-500/20 bg-emerald-500/10' : (ev.relevance_score || 0) >= 40 ? 'text-yellow-400 border-yellow-500/20 bg-yellow-500/10' : 'text-red-400 border-red-500/20 bg-red-500/10'}`}>
+                            Relevance: {ev.relevance_score || 0}%
+                          </span>
+                        </button>
+                      ))
+                    ) : (
+                      <div className="text-center p-12 text-slate-600">
+                        <Eye className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                        <p className="text-sm font-medium">Select a case to view evidence</p>
                       </div>
-                    </div>
-                  )}
+                    )}
+                  </div>
+                </div>
+
+                {/* Step 3: Upload File & Verify */}
+                <div className="space-y-6">
+                  <h2 className="text-xs font-black text-emerald-400 uppercase tracking-widest">Step 3: Verify</h2>
+                  <div className="glass-card rounded-[2rem] p-8 border-white/5 relative overflow-hidden group">
+                    {selectedVerifyEvidence ? (
+                      <>
+                        <div className="mb-6 p-4 bg-slate-950/60 rounded-xl border border-white/5">
+                          <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Selected Evidence</p>
+                          <p className="text-sm font-bold text-white">{selectedVerifyEvidence.evidence_id} - {selectedVerifyEvidence.description || selectedVerifyEvidence.filename}</p>
+                          <p className="text-[10px] font-mono text-slate-400 mt-2 break-all">SHA-256: {selectedVerifyEvidence.sha256}</p>
+                        </div>
+
+                        <div className={`border-2 border-dashed rounded-2xl p-8 text-center cursor-pointer transition-all ${verifyFile ? 'border-emerald-500/50 bg-emerald-500/5' : 'border-white/10 hover:border-emerald-500/30 hover:bg-slate-900/50'}`}
+                          onClick={() => document.getElementById('verifyInput').click()}>
+                          <input type="file" id="verifyInput" className="hidden" onChange={handleVerifyFileChange} />
+                          <Upload className={`w-8 h-8 mx-auto mb-3 ${verifyFile ? 'text-emerald-400' : 'text-slate-600'}`} />
+                          <h3 className="text-lg font-bold text-white mb-1">{verifyFile ? verifyFile.name : 'Upload File to Verify'}</h3>
+                          <p className="text-xs text-slate-500">Select the same file that was uploaded as evidence</p>
+                        </div>
+
+                        {verifyFile && (
+                          <button onClick={runCourtVerification} disabled={isVerifying} className="w-full mt-6 py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs uppercase rounded-xl transition-all disabled:opacity-50 flex items-center justify-center">
+                            {isVerifying ? <Activity className="animate-spin mr-2 w-4 h-4" /> : <Shield className="mr-2 w-4 h-4" />}
+                            {isVerifying ? 'Verifying...' : 'Verify Evidence'}
+                          </button>
+                        )}
+
+                        {verifyResult && (
+                          <div className={`mt-6 p-6 rounded-xl border ${verifyResult.error ? 'bg-red-500/10 border-red-500/30' : verifyResult.is_valid ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-red-500/10 border-red-500/30'}`}>
+                            {verifyResult.error ? (
+                              <div className="flex items-center space-x-3">
+                                <AlertTriangle className="w-5 h-5 text-red-400 flex-shrink-0" />
+                                <div>
+                                  <p className="text-sm font-bold text-red-400">Verification Failed</p>
+                                  <p className="text-xs text-red-200">{verifyResult.error}</p>
+                                </div>
+                              </div>
+                            ) : verifyResult.is_valid ? (
+                              <div className="flex items-center space-x-3">
+                                <CheckCircle className="w-5 h-5 text-emerald-400 flex-shrink-0" />
+                                <div>
+                                  <p className="text-sm font-bold text-emerald-400">✅ Evidence is Authentic!</p>
+                                  <p className="text-xs text-emerald-200">Hash matches stored value.</p>
+                                  <p className="text-[9px] font-mono text-emerald-300 mt-2 break-all">Computed: {verifyResult.computed_hash}</p>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="flex items-center space-x-3">
+                                <AlertTriangle className="w-5 h-5 text-amber-400 flex-shrink-0" />
+                                <div>
+                                  <p className="text-sm font-bold text-amber-400">⚠️ Evidence Tampered!</p>
+                                  <p className="text-xs text-amber-200">Hash does not match stored value.</p>
+                                  <p className="text-[9px] font-mono text-amber-300 mt-2 break-all">Stored: {verifyResult.stored_hash}</p>
+                                  <p className="text-[9px] font-mono text-red-300 break-all">Computed: {verifyResult.computed_hash}</p>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <div className="text-center p-12 text-slate-600">
+                        <Eye className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                        <p className="text-sm font-medium">Select evidence to start verification</p>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
